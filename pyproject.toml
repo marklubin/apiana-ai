@@ -1,0 +1,50 @@
+[build-system]
+requires = ["hatchling", "uv-dynamic-versioning"]
+build-backend = "hatchling.build"
+
+[tool.hatch.version]
+source = "uv-dynamic-versioning"
+
+[tool.uv-dynamic-versioning]
+vcs = "git"
+style = "pep440"
+bump = true
+
+[project]
+name = "chatgpt-export-processor"
+dynamic = ["version"]
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.13"
+
+dependencies = [
+    "pydantic>=2.11.5",
+    "textual>=3.2.0",
+]
+
+[project.scripts]
+processor-tui = "export_processor.chatgpt.tui:main"
+
+
+[tool.uv.sources]
+export_processor = { workspace = true }
+
+
+[tool.hatch.build.targets.wheel]
+packages = ["export_processor"]
+
+[tool.hatch.build]
+packages = ["export_processor"]
+include = [
+
+    "LICENSE",
+    "README.md"
+]
+
+[dependency-groups]
+dev = [
+    "ruff>=0.11.7",
+    "hatch>=1.14.1",
+    "textual-dev>=1.7.0",
+    "debugpy>=1.8.14",
+]
