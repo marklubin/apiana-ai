@@ -1,4 +1,4 @@
-from export_processor.chatgpt.tui import ChatGPTExportProcessor
+from apiana.applications.chatgpt_export_tui.tui import ChatGPTExportProcessor
 import debugpy
 if __name__ == "__main__":
     

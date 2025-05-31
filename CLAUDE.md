@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-This is a ChatGPT Export Processor - a Python application for processing and analyzing ChatGPT conversation exports. It provides a Terminal User Interface (TUI) for browsing conversations and preparing them for summarization.
+Apiana AI is a comprehensive system for building memory-enabled AI agents. This monorepo contains the reference implementation for creating AI systems with persistent, experiential memory that can remember, reflect, and evolve with users over time.
 
 ## Common Development Commands
 
@@ -12,49 +12,87 @@ This is a ChatGPT Export Processor - a Python application for processing and ana
 # Install dependencies (using uv package manager)
 uv sync
 
-# Run the TUI application
-uv run processor-tui
+# Run the ChatGPT Export TUI application
+uv run gpt-export-tui
 # or
 uv run python main.py
 
 # Run with hot reload during development
-uv run textual run --dev export_processor/chatgpt/tui.py
+uv run textual run --dev apiana/applications/chatgpt_export_tui/tui.py
 
-# Run with debugging enabled
-uv run python main.py  # debugpy is already imported
+# Run linting
+uv run ruff check .
+
+# Run type checking
+uv run mypy .
 ```
 
 ## Code Architecture
 
+### Module Structure
+
+```
+apiana/
+├── applications/          # User-facing applications
+│   └── chatgpt_export_tui/  # Terminal UI for processing ChatGPT exports
+├── configuration.py       # System-wide configuration schemas
+├── embeddings/           # Embedding generation (local models)
+├── flows/                # Processing workflows (Prefect-based)
+├── llm/                  # LLM interfaces (OpenAI-compatible)
+└── storage/              # Storage backends (Neo4j, future: vector DBs)
+```
+
 ### Core Components
 
-1. **Data Models** (`export_processor/chatgpt/schema.py`):
-   - `Message`: Individual message with role, content, timestamps
-   - `OpenAIConversation`: Full conversation with title, messages, metadata
-   - Handles ChatGPT's nested export format with content parts
+1. **Configuration** (`apiana/configuration.py`):
+   - `ProcessorConfig`: Main configuration container
+   - `Neo4jConfig`: Database connection settings
+   - `LLMProviderConfig`: LLM service configuration
+   - `EmbedderConfig`: Embedding model settings
 
-2. **TUI Application** (`export_processor/chatgpt/tui.py`):
-   - Built with Textual framework
-   - State machine workflow: new → loading → loaded → prompt_selection → confirming
-   - Components: FilePicker, DataTable, TextArea
-   - Handles file selection, validation, and prompt selection
+2. **Memory Processing** (`apiana/flows/chatgpt_export_processor.py`):
+   - Prefect-based workflow orchestration
+   - Batch processing with concurrent execution
+   - Progress tracking and error handling
+   - Memory storage in Neo4j with embeddings
+
+3. **Storage Layer** (`apiana/storage/neo4j_store.py`):
+   - Graph-based memory storage
+   - Experiential memory nodes with relationships
+   - Vector similarity search capabilities
+   - ProcessorRun tracking for batch jobs
+
+4. **LLM Integration** (`apiana/llm/openai_agent.py`):
+   - OpenAI-compatible client (works with Ollama, OpenAI, etc.)
+   - Structured output support
+   - System prompts and temperature control
+
+5. **Embeddings** (`apiana/embeddings/local_embedder.py`):
+   - Local model support via Transformers
+   - Privacy-preserving vector generation
+   - Configurable model selection
 
 ### Key Implementation Details
 
-- The app expects ChatGPT JSON exports in the `data/` directory
-- Prompt files should be placed in the `prompts/` directory
-- Output would go to the `output/` directory (not yet implemented)
-- The summarization logic itself is not implemented - the app currently only sets up the UI workflow
-
-### Dependencies
-
-- Python 3.13+ required
-- Core: `pydantic` (data validation), `textual` (TUI framework)
-- Development: `ruff` (linting), `textual-dev`, `debugpy`
+- **Memory Types**: Experiential, Conceptual, Reference, Reflective, Task State
+- **Data Models**: Using dataclasses (no Pydantic dependency)
+- **Async Support**: Currently synchronous, async can be added as needed
+- **Error Handling**: Comprehensive error handling with retries
+- **Testing**: Use pytest for unit and integration tests
 
 ### Development Notes
 
 - Always use `uv` for package management (not pip)
-- The project uses dataclasses for data models
-- Error handling is implemented for file parsing operations
-- The TUI uses Textual's logging system for debugging
+- Import modules unconditionally at the top of files
+- Use dataclasses instead of Pydantic models
+- Follow existing code patterns and conventions
+- Neo4j required for storage (future: pluggable backends)
+- The project is designed to be extensible and modular
+
+### Future Considerations
+
+- Vector database support (Chroma, Weaviate)
+- Multi-agent memory sharing protocols
+- Reflection scheduling and automated journaling
+- Fine-tuning pipelines from memory corpus
+- Web-based memory browser interface

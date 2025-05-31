@@ -11,33 +11,35 @@ style = "pep440"
 bump = true
 
 [project]
-name = "chatgpt-export-processor"
+name = "apiana-ai"
 dynamic = ["version"]
-description = "Add your description here"
+description = "Apiana AI: Self reflective AI companion."
 readme = "README.md"
 requires-python = ">=3.13"
 
 dependencies = [
     "neo4j>=5.28.1",
     "neo4j-graphrag>=1.7.0",
-    "ollama-python>=0.1.2",
-    "pydantic>=2.11.5",
+    "numpy>=2.2.6",
+    "openai>=1.82.1",
     "textual>=3.2.0",
+    "torch>=2.7.0",
+    "transformers>=4.52.4",
 ]
 
 [project.scripts]
-processor-tui = "export_processor.chatgpt.tui:main"
+gpt-export-tui = "apiana.applications.chatgpt_export_tui.tui:main"
 
 
 [tool.uv.sources]
-export_processor = { workspace = true }
+apiana = { workspace = true }
 
 
 [tool.hatch.build.targets.wheel]
-packages = ["export_processor"]
+packages = ["apiana"]
 
 [tool.hatch.build]
-packages = ["export_processor"]
+packages = ["apiana"]
 include = [
 
     "LICENSE",

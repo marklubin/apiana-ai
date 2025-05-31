@@ -1,16 +1,40 @@
 from textual.app import App
 from textual.reactive import reactive
 from textual.widget import Widget
-from textual.widgets import  Header, Static, DirectoryTree, LoadingIndicator, DataTable, TextArea
+from textual.widgets import  Header, Static, DirectoryTree, LoadingIndicator, DataTable, TextArea, Footer
 from textual.errors import RenderError
 from textual.logging import TextualHandler
 from .schema import OpenAIConversation
 import json
 
+class UISelectionWorkflow:        
+        state  = reactive("new")
+        input_filename = reactive(None)
+        validated_convos = reactive([])
+        system_prompt_filename = reactive(None)
+        prompt_template = reactive(None)
 
 class FilteredDirectoryTree(DirectoryTree):
+    
+    @classmethod
+    def hidden_file_filter(path):
+        """Filter function to exclude hidden files and directories."""
+        return not path.name.startswith(".")
+
+    @classmethod
+    def all_files_filter(path):
+        """Filter function to include all files."""
+        return  path.is_file()
+    
+    def __init__(self, path, filter):
+        self.filter = filter
+        
+    def compose(self):
+        yield from super().compose()
+     
     def filter_paths(self, paths):
-        return [path for path in paths if not path.name.startswith(".")]
+        return [path for path in paths if not filter(path)]
+    
     
 class FilePicker(Widget):
     path = reactive("../")
@@ -22,7 +46,7 @@ class FilePicker(Widget):
     
     def compose(self):
         yield Static(self.user_prompt)
-        yield FilteredDirectoryTree(self.path)
+        yield FilteredDirectoryTree(self.path, FilteredDirectoryTree.hidden_file_filter)
 
     def on_directory_tree_directory_selected(self, event):
         self.path = event.path
@@ -33,40 +57,39 @@ class FilePicker(Widget):
             self.on_file_selected(file_path)
 
 class ChatGPTExportProcessor(App):
-    workflow_state  = reactive("new")
-    input_filename = reactive(None)
-    validated_convos = reactive([])
-    prompt_text = reactive(None)
+    
+    
     
     def on_mount(self):
         self.theme = "solarized-light"
+        self.workflow = UISelectionWorkflow()
     
     def compose(self):
         yield Header("ChatGPT Export Processor")
         
-        if self.workflow_state == "new":
+        if self.workflow.state == "new":
             yield FilePicker("Select a file to process ChatGPT conversations:",
                              self.on_file_selection_complete)
-        elif self.workflow_state == "loading":
-            yield LoadingIndicator("Processing file...")
-        elif self.workflow_state == "loaded":
+        elif self.workflow.state == "loading":
+            yield LoadingIndicator("Validating Schema...")
+        elif self.workflow.state == "loaded":
             yield Static(f"Processed {len(self.validated_convos)} conversations.")
             dt = DataTable()
             self.load_table(dt)
             yield dt
             yield Static("Press ENTER to select summarization prompt.")
-        elif self.workflow_state == "prompt_selection":
+        elif self.workflow.state == "prompt_selection":
             yield FilePicker(
-                "Select a summarization prompt file:",
+                "Select a summarization system prompt file:",
                 self.on_prompt_file_selection_complete
             )
-        elif self.workflow_state == "comfirming":
+        elif self.workflow.state == "comfirming":
             yield Static(f"Ready to summarize {len(self.validated_convos)} conversations selected Prompt.")
             yield TextArea(text=self.prompt_text)
             
             
     def key_enter(self):
-        if self.workflow_state == "loaded":
+        if self.workflow.state == "loaded":
             self.change_workflow_state("prompt_selection")
         
     def on_prompt_file_selection_complete(self, file_path: str) -> None:
@@ -147,7 +170,7 @@ class ChatGPTExportProcessor(App):
         ])
         
     def change_workflow_state(self, new_state: str) -> None:
-        self.workflow_state = new_state
+        self.workflow.state = new_state
         self.refresh(recompose=True)
  
  

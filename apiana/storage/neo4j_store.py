@@ -8,7 +8,8 @@ import os
 
 from neomodel import (
     config, StructuredNode, StringProperty, DateTimeProperty,
-    ArrayProperty, FloatProperty, IntegerProperty, JSONProperty, db
+    ArrayProperty, FloatProperty, IntegerProperty, JSONProperty, 
+    RelationshipTo, RelationshipFrom, db
 )
 from neomodel.exceptions import UniqueProperty
 
@@ -256,3 +257,50 @@ class Neo4jMemoryStore:
         # TODO: Implement update logic
         # This will be used by the separate contextual tagging agent
         pass
+
+
+class ProcessorRun(StructuredNode):
+    """
+    Node model for tracking processor runs.
+    
+    Stores configuration and metadata for each batch processing run.
+    """
+    # Unique run ID
+    run_id = StringProperty(required=True, unique_index=True)
+    
+    # Configuration
+    prompt_name = StringProperty(required=True)
+    prompt_files = JSONProperty(required=True)  # Stores system and user prompt filenames
+    embedder_config = JSONProperty(required=True)
+    llm_provider_config = JSONProperty(required=True)
+    
+    # Run metadata
+    created_at = DateTimeProperty(default_now=True)
+    completed_at = DateTimeProperty()
+    status = StringProperty(default="running")  # running, completed, failed
+    
+    # Statistics
+    total_conversations = IntegerProperty(default=0)
+    successful_summaries = IntegerProperty(default=0)
+    failed_summaries = IntegerProperty(default=0)
+    duration_seconds = FloatProperty()
+    
+    # Output location
+    output_directory = StringProperty()
+    
+    # Relationships
+    summaries = RelationshipTo('ExperientialSummary', 'GENERATED')
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to dictionary."""
+        return {
+            'run_id': self.run_id,
+            'prompt_name': self.prompt_name,
+            'status': self.status,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+            'completed_at': self.completed_at.isoformat() if self.completed_at else None,
+            'total_conversations': self.total_conversations,
+            'successful_summaries': self.successful_summaries,
+            'failed_summaries': self.failed_summaries,
+            'output_directory': self.output_directory
+        }
