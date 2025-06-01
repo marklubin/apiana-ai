@@ -7,12 +7,6 @@ from textual.logging import TextualHandler
 from .schema import OpenAIConversation
 import json
 
-class UISelectionWorkflow:        
-        state  = reactive("new")
-        input_filename = reactive(None)
-        validated_convos = reactive([])
-        system_prompt_filename = reactive(None)
-        prompt_template = reactive(None)
 
 class FilteredDirectoryTree(DirectoryTree):
     
@@ -27,13 +21,11 @@ class FilteredDirectoryTree(DirectoryTree):
         return  path.is_file()
     
     def __init__(self, path, filter):
+        super().__init__(path)
         self.filter = filter
-        
-    def compose(self):
-        yield from super().compose()
      
     def filter_paths(self, paths):
-        return [path for path in paths if not filter(path)]
+        return [path for path in paths if not self.filter(path)]
     
     
 class FilePicker(Widget):
@@ -58,38 +50,40 @@ class FilePicker(Widget):
 
 class ChatGPTExportProcessor(App):
     
-    
+    state  = reactive("new")
+    input_filename = reactive(None)
+    validated_convos = reactive([])
+    system_prompt_filename = reactive(None)
     
     def on_mount(self):
         self.theme = "solarized-light"
-        self.workflow = UISelectionWorkflow()
     
     def compose(self):
         yield Header("ChatGPT Export Processor")
         
-        if self.workflow.state == "new":
+        if self.state == "new":
             yield FilePicker("Select a file to process ChatGPT conversations:",
                              self.on_file_selection_complete)
-        elif self.workflow.state == "loading":
+        elif self.state == "loading":
             yield LoadingIndicator("Validating Schema...")
-        elif self.workflow.state == "loaded":
+        elif self.state == "loaded":
             yield Static(f"Processed {len(self.validated_convos)} conversations.")
             dt = DataTable()
             self.load_table(dt)
             yield dt
             yield Static("Press ENTER to select summarization prompt.")
-        elif self.workflow.state == "prompt_selection":
+        elif self.state == "prompt_selection":
             yield FilePicker(
                 "Select a summarization system prompt file:",
                 self.on_prompt_file_selection_complete
             )
-        elif self.workflow.state == "comfirming":
+        elif self.state == "comfirming":
             yield Static(f"Ready to summarize {len(self.validated_convos)} conversations selected Prompt.")
             yield TextArea(text=self.prompt_text)
             
             
     def key_enter(self):
-        if self.workflow.state == "loaded":
+        if self.state == "loaded":
             self.change_workflow_state("prompt_selection")
         
     def on_prompt_file_selection_complete(self, file_path: str) -> None:
@@ -170,7 +164,7 @@ class ChatGPTExportProcessor(App):
         ])
         
     def change_workflow_state(self, new_state: str) -> None:
-        self.workflow.state = new_state
+        self.state = new_state
         self.refresh(recompose=True)
  
  

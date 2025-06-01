@@ -292,7 +292,11 @@ class ProcessorRun(StructuredNode):
     summaries = RelationshipTo('ExperientialSummary', 'GENERATED')
     
     def to_dict(self) -> Dict[str, Any]:
-        """Convert to dictionary."""
+        """Convert to dictionary.
+        
+        Note: This is a neomodel StructuredNode, not a dataclass,
+        so we need a custom to_dict method for serialization.
+        """
         return {
             'run_id': self.run_id,
             'prompt_name': self.prompt_name,

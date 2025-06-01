@@ -1,12 +1,20 @@
 """
 Configuration classes for the Apiana processing system.
+
+This module provides configuration management for different environments:
+- local: Everything runs on the local machine
+- dev: Uses remote Ollama and development Neo4j instances
+- production: Uses 3rd party APIs (OpenAI) and hosted services
 """
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, asdict
 from typing import Dict, Any, Optional, Tuple
 from pathlib import Path
 import json
 import uuid
+import os
+import tomllib
+from datetime import datetime
 
 
 @dataclass
@@ -19,22 +27,15 @@ class PromptConfig:
 
 @dataclass
 class LLMProviderConfig:
-    """Configuration for LLM provider."""
-    type: str = "openai"  # "openai", "ollama", etc.
+    """Configuration for LLM provider.
+    
+    All providers use OpenAI-compatible APIs, so no type field is needed.
+    """
     model: str = "gpt-4"
     base_url: Optional[str] = None
     api_key: Optional[str] = None
     temperature: float = 0.7
     max_tokens: int = 4096
-    
-    def to_dict(self) -> Dict[str, Any]:
-        return {
-            'type': self.type,
-            'model': self.model,
-            'base_url': self.base_url,
-            'temperature': self.temperature,
-            'max_tokens': self.max_tokens
-        }
 
 
 @dataclass
@@ -43,18 +44,35 @@ class EmbedderConfig:
     type: str = "local"  # "local", "openai", etc.
     model: str = "nomic-embed-text"
     dimension: int = 768
-    
-    def to_dict(self) -> Dict[str, Any]:
-        return {
-            'type': self.type,
-            'model': self.model,
-            'dimension': self.dimension
-        }
 
 
 @dataclass
 class Neo4jConfig:
-    """Configuration for Neo4j database connection."""
+    """Configuration for Neo4j database connection.
+    
+    Database Structure:
+    The Apiana system uses Neo4j to store the following node types:
+    
+    1. ExperientialMemory - Stores actual conversation memories
+       - Properties: content, embedding, timestamp, context
+       - Relationships: RELATES_TO (other memories), TAGGED_WITH (tags)
+    
+    2. ConceptualMemory - Abstract concepts derived from experiences
+       - Properties: concept, description, confidence
+       - Relationships: DERIVED_FROM (experiential memories)
+    
+    3. ReflectiveMemory - Self-reflections and insights
+       - Properties: reflection, importance, timestamp
+       - Relationships: REFLECTS_ON (other memories)
+    
+    4. ProcessorRun - Tracks batch processing runs
+       - Properties: run_id, status, configuration, statistics
+       - Relationships: GENERATED (memories created in this run)
+    
+    5. Tag - Contextual tags for organizing memories
+       - Properties: name, category
+       - Relationships: TAGS (memories)
+    """
     uri: str = "bolt://localhost:7687"
     username: str = "neo4j"
     password: str = "password"
@@ -64,19 +82,31 @@ class Neo4jConfig:
     def auth(self) -> Tuple[str, str]:
         """Return auth tuple for Neo4j driver."""
         return (self.username, self.password)
-    
-    def to_dict(self) -> Dict[str, Any]:
-        return {
-            'uri': self.uri,
-            'username': self.username,
-            'database': self.database
-        }
+
+
+def json_encoder(obj: Any) -> Any:
+    """Custom JSON encoder for dataclasses and datetime objects."""
+    if isinstance(obj, datetime):
+        return obj.isoformat()
+    elif dataclass.__class__.__name__ in str(type(obj)):
+        return asdict(obj)
+    else:
+        raise TypeError(f"Object of type {type(obj).__name__} is not JSON serializable")
 
 
 @dataclass
 class ProcessorConfig:
-    """Main configuration for the conversation processor."""
+    """Main configuration for the conversation processor.
+    
+    This can be loaded from TOML files for different environments.
+    """
+    # General settings
+    environment: str = "local"
     run_id: str = field(default_factory=lambda: str(uuid.uuid4()))
+    batch_size: int = 10
+    output_base_dir: str = "output"
+    
+    # Component configurations
     prompt: PromptConfig = field(default_factory=lambda: PromptConfig(
         name="default",
         system_prompt_file="self-reflective-system-message.txt",
@@ -85,8 +115,6 @@ class ProcessorConfig:
     llm_provider: LLMProviderConfig = field(default_factory=LLMProviderConfig)
     embedder: EmbedderConfig = field(default_factory=EmbedderConfig)
     neo4j: Neo4jConfig = field(default_factory=Neo4jConfig)
-    batch_size: int = 10
-    output_base_dir: str = "output"
     
     def get_output_dir(self) -> Path:
         """Get the output directory for this run."""
@@ -98,21 +126,8 @@ class ProcessorConfig:
     
     def save_to_file(self, path: Path) -> None:
         """Save configuration to JSON file."""
-        config_dict = {
-            'run_id': self.run_id,
-            'prompt': {
-                'name': self.prompt.name,
-                'system_prompt_file': self.prompt.system_prompt_file,
-                'user_prompt_template_file': self.prompt.user_prompt_template_file
-            },
-            'llm_provider': self.llm_provider.to_dict(),
-            'embedder': self.embedder.to_dict(),
-            'neo4j': self.neo4j.to_dict(),
-            'batch_size': self.batch_size,
-            'output_base_dir': self.output_base_dir
-        }
         with open(path, 'w') as f:
-            json.dump(config_dict, f, indent=2)
+            json.dump(self, f, default=json_encoder, indent=2)
     
     @classmethod
     def from_file(cls, path: Path) -> 'ProcessorConfig':
@@ -121,6 +136,7 @@ class ProcessorConfig:
             config_dict = json.load(f)
         
         return cls(
+            environment=config_dict.get('environment', 'local'),
             run_id=config_dict.get('run_id', str(uuid.uuid4())),
             prompt=PromptConfig(**config_dict.get('prompt', {})),
             llm_provider=LLMProviderConfig(**config_dict.get('llm_provider', {})),
@@ -129,3 +145,64 @@ class ProcessorConfig:
             batch_size=config_dict.get('batch_size', 10),
             output_base_dir=config_dict.get('output_base_dir', 'output')
         )
+    
+    @classmethod
+    def from_toml(cls, path: Path) -> 'ProcessorConfig':
+        """Load configuration from TOML file with environment variable substitution."""
+        with open(path, 'rb') as f:
+            config_dict = tomllib.load(f)
+        
+        # Process environment variable substitutions
+        def substitute_env_vars(value: Any) -> Any:
+            if isinstance(value, str) and value.startswith('${') and value.endswith('}'):
+                env_var = value[2:-1]
+                return os.getenv(env_var, value)
+            elif isinstance(value, dict):
+                return {k: substitute_env_vars(v) for k, v in value.items()}
+            elif isinstance(value, list):
+                return [substitute_env_vars(v) for v in value]
+            return value
+        
+        config_dict = substitute_env_vars(config_dict)
+        
+        # Extract general settings
+        general = config_dict.get('general', {})
+        
+        return cls(
+            environment=general.get('environment', 'local'),
+            batch_size=general.get('batch_size', 10),
+            output_base_dir=general.get('output_base_dir', 'output'),
+            prompt=PromptConfig(**config_dict.get('prompt', {})),
+            llm_provider=LLMProviderConfig(**config_dict.get('llm_provider', {})),
+            embedder=EmbedderConfig(**config_dict.get('embedder', {})),
+            neo4j=Neo4jConfig(**config_dict.get('neo4j', {}))
+        )
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to dictionary using dataclasses.asdict."""
+        return asdict(self)
+    
+    @classmethod
+    def load_from_environment(cls) -> 'ProcessorConfig':
+        """Load configuration based on APIANA_ENVIRONMENT_STAGE environment variable.
+        
+        Looks for APIANA_ENVIRONMENT_STAGE environment variable and loads the
+        corresponding TOML file from the configs directory.
+        
+        Environment mappings:
+        - local -> configs/local.toml
+        - dev -> configs/dev.toml
+        - production -> configs/production.toml
+        
+        Falls back to local.toml if environment variable is not set.
+        """
+        stage = os.getenv('APIANA_ENVIRONMENT_STAGE', 'local')
+        config_path = Path(__file__).parent.parent / 'configs' / f'{stage}.toml'
+        
+        if not config_path.exists():
+            raise FileNotFoundError(
+                f"Configuration file not found: {config_path}\n"
+                f"APIANA_ENVIRONMENT_STAGE={stage}"
+            )
+        
+        return cls.from_toml(config_path)
