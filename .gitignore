@@ -9,7 +9,7 @@ wheels/
 # Virtual environments
 .venv
 
-
+neo4j/*
 data/*
 output/*
 .vscode
