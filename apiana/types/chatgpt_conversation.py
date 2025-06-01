@@ -1,6 +1,7 @@
 from datetime import datetime
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, asdict
 from typing import Optional, Any, Dict, List
+import json
 
 @dataclass
 class Message:
@@ -65,9 +66,17 @@ class Message:
             )
         except Exception:
             return None
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert Message to dictionary with JSON-serializable types"""
+        data = asdict(self)
+        # Convert datetime to ISO format string
+        if data.get('created_at') and isinstance(data['created_at'], datetime):
+            data['created_at'] = data['created_at'].isoformat()
+        return data
 
 @dataclass
-class OpenAIConversation:
+class ChatGPTConversation:
     title: str = "Untitled Conversation"
     messages: List[Message] = field(default_factory=list)
     openai_conversation_id: Optional[str] = None
@@ -122,7 +131,7 @@ class OpenAIConversation:
         return messages
 
     @classmethod
-    def from_dict(cls, data: Dict) -> Optional['OpenAIConversation']:
+    def from_dict(cls, data: Dict) -> Optional['ChatGPTConversation']:
         """Create conversation from ChatGPT export JSON"""
         if not data or not isinstance(data, dict):
             return None
@@ -144,3 +153,18 @@ class OpenAIConversation:
             
         except Exception:
             return None
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert ChatGPTConversation to dictionary with JSON-serializable types"""
+        data = {
+            'title': self.title,
+            'messages': [msg.to_dict() for msg in self.messages],
+            'openai_conversation_id': self.openai_conversation_id,
+            'create_time': self.create_time.isoformat() if self.create_time else None,
+            'update_time': self.update_time.isoformat() if self.update_time else None
+        }
+        return data
+    
+    def to_json(self, indent: Optional[int] = None) -> str:
+        """Convert ChatGPTConversation to JSON string"""
+        return json.dumps(self.to_dict(), indent=indent)

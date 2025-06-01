@@ -7,7 +7,7 @@ import hashlib
 import json
 import logging
 from functools import wraps
-from typing import Callable, Any, Optional
+from typing import Callable, Optional
 
 from apiana.storage.task_cache import Neo4jTaskCache
 

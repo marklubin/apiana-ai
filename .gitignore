@@ -14,3 +14,7 @@ data/*
 output/*
 .vscode
 
+
+.idea/*
+input/*
+output/*

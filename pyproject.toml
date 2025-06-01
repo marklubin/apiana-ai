@@ -18,23 +18,25 @@ readme = "README.md"
 requires-python = ">=3.13"
 
 dependencies = [
+    "atomics>=1.0.3",
+    "injector>=0.22.0",
     "neo4j>=5.28.1",
     "neo4j-graphrag>=1.7.0",
+    "neomodel>=5.4.5",
     "numpy>=2.2.6",
     "openai>=1.82.1",
+    "sentence-transformers>=4.1.0",
     "textual>=3.2.0",
     "torch>=2.7.0",
     "transformers>=4.52.4",
 ]
 
 [project.scripts]
-gpt-export-tui = "apiana.applications.chatgpt_export_tui.tui:main"
-chatgpt-export-process = "apiana.chatgpt_export_cli:main"
-
+chatgpt-export = "apiana.applications.chatgpt_export.cli:main"
+chatgpt-export-tui = "apiana.applications.chatgpt_export.tui:main"
 
 [tool.uv.sources]
 apiana = { workspace = true }
-
 
 [tool.hatch.build.targets.wheel]
 packages = ["apiana"]
@@ -53,4 +55,5 @@ dev = [
     "hatch>=1.14.1",
     "textual-dev>=1.7.0",
     "debugpy>=1.8.14",
+    "pytest>=8.3.5",
 ]

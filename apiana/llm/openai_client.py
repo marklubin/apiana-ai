@@ -6,7 +6,7 @@ Supports structured outputs using dataclass models.
 """
 
 import logging
-from typing import Optional, List, Union, Any
+from typing import Optional, List, Any
 
 from openai import AsyncOpenAI
 from openai.types.chat import ChatCompletionMessageParam

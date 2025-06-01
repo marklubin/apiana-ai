@@ -12,8 +12,6 @@ from typing import Dict, Any, Optional, Tuple
 from pathlib import Path
 import json
 import uuid
-import os
-import tomllib
 from datetime import datetime
 
 
@@ -49,29 +47,6 @@ class EmbedderConfig:
 @dataclass
 class Neo4jConfig:
     """Configuration for Neo4j database connection.
-    
-    Database Structure:
-    The Apiana system uses Neo4j to store the following node types:
-    
-    1. ExperientialMemory - Stores actual conversation memories
-       - Properties: content, embedding, timestamp, context
-       - Relationships: RELATES_TO (other memories), TAGGED_WITH (tags)
-    
-    2. ConceptualMemory - Abstract concepts derived from experiences
-       - Properties: concept, description, confidence
-       - Relationships: DERIVED_FROM (experiential memories)
-    
-    3. ReflectiveMemory - Self-reflections and insights
-       - Properties: reflection, importance, timestamp
-       - Relationships: REFLECTS_ON (other memories)
-    
-    4. ProcessorRun - Tracks batch processing runs
-       - Properties: run_id, status, configuration, statistics
-       - Relationships: GENERATED (memories created in this run)
-    
-    5. Tag - Contextual tags for organizing memories
-       - Properties: name, category
-       - Relationships: TAGS (memories)
     """
     uri: str = "bolt://localhost:7687"
     username: str = "neo4j"
@@ -95,7 +70,7 @@ def json_encoder(obj: Any) -> Any:
 
 
 @dataclass
-class ProcessorConfig:
+class ChatGPTExportProcessorConfiguration:
     """Main configuration for the conversation processor.
     
     This can be loaded from TOML files for different environments.
@@ -130,7 +105,7 @@ class ProcessorConfig:
             json.dump(self, f, default=json_encoder, indent=2)
     
     @classmethod
-    def from_file(cls, path: Path) -> 'ProcessorConfig':
+    def from_file(cls, path: Path) -> 'ChatGPTExportProcessorConfiguration':
         """Load configuration from JSON file."""
         with open(path, 'r') as f:
             config_dict = json.load(f)
@@ -146,63 +121,8 @@ class ProcessorConfig:
             output_base_dir=config_dict.get('output_base_dir', 'output')
         )
     
-    @classmethod
-    def from_toml(cls, path: Path) -> 'ProcessorConfig':
-        """Load configuration from TOML file with environment variable substitution."""
-        with open(path, 'rb') as f:
-            config_dict = tomllib.load(f)
-        
-        # Process environment variable substitutions
-        def substitute_env_vars(value: Any) -> Any:
-            if isinstance(value, str) and value.startswith('${') and value.endswith('}'):
-                env_var = value[2:-1]
-                return os.getenv(env_var, value)
-            elif isinstance(value, dict):
-                return {k: substitute_env_vars(v) for k, v in value.items()}
-            elif isinstance(value, list):
-                return [substitute_env_vars(v) for v in value]
-            return value
-        
-        config_dict = substitute_env_vars(config_dict)
-        
-        # Extract general settings
-        general = config_dict.get('general', {})
-        
-        return cls(
-            environment=general.get('environment', 'local'),
-            batch_size=general.get('batch_size', 10),
-            output_base_dir=general.get('output_base_dir', 'output'),
-            prompt=PromptConfig(**config_dict.get('prompt', {})),
-            llm_provider=LLMProviderConfig(**config_dict.get('llm_provider', {})),
-            embedder=EmbedderConfig(**config_dict.get('embedder', {})),
-            neo4j=Neo4jConfig(**config_dict.get('neo4j', {}))
-        )
     
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary using dataclasses.asdict."""
         return asdict(self)
     
-    @classmethod
-    def load_from_environment(cls) -> 'ProcessorConfig':
-        """Load configuration based on APIANA_ENVIRONMENT_STAGE environment variable.
-        
-        Looks for APIANA_ENVIRONMENT_STAGE environment variable and loads the
-        corresponding TOML file from the configs directory.
-        
-        Environment mappings:
-        - local -> configs/local.toml
-        - dev -> configs/dev.toml
-        - production -> configs/production.toml
-        
-        Falls back to local.toml if environment variable is not set.
-        """
-        stage = os.getenv('APIANA_ENVIRONMENT_STAGE', 'local')
-        config_path = Path(__file__).parent.parent / 'configs' / f'{stage}.toml'
-        
-        if not config_path.exists():
-            raise FileNotFoundError(
-                f"Configuration file not found: {config_path}\n"
-                f"APIANA_ENVIRONMENT_STAGE={stage}"
-            )
-        
-        return cls.from_toml(config_path)

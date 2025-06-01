@@ -18,7 +18,7 @@ uv run gpt-export-tui
 uv run python main.py
 
 # Run with hot reload during development
-uv run textual run --dev apiana/applications/chatgpt_export_tui/tui.py
+uv run textual run --dev apiana/applications/chatgpt_export/tui.py
 
 # Run linting
 uv run ruff check .

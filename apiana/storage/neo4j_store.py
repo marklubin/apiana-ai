@@ -1,17 +1,37 @@
 """
 Neo4j storage implementation using neomodel ORM for experiential summaries.
+
+Database Structure:
+    The Apiana system uses Neo4j to store the following node types:
+
+    1. ExperientialMemory - Stores actual conversation memories
+       - Properties: content, embedding, timestamp, context
+       - Relationships: RELATES_TO (other memories), TAGGED_WITH (tags)
+
+    2. ConceptualMemory - Abstract concepts derived from experiences
+       - Properties: concept, description, confidence
+       - Relationships: DERIVED_FROM (experiential memories)
+
+    3. ReflectiveMemory - Self-reflections and insights
+       - Properties: reflection, importance, timestamp
+       - Relationships: REFLECTS_ON (other memories)
+
+    4. ProcessorRun - Tracks batch processing runs
+       - Properties: run_id, status, configuration, statistics
+       - Relationships: GENERATED (memories created in this run)
+
+    5. Tag - Contextual tags for organizing memories
+       - Properties: name, category
+       - Relationships: TAGS (memories)
 """
 
 from typing import List, Dict, Any, Tuple, Optional
-from datetime import datetime
-import os
 
 from neomodel import (
     config, StructuredNode, StringProperty, DateTimeProperty,
     ArrayProperty, FloatProperty, IntegerProperty, JSONProperty, 
-    RelationshipTo, RelationshipFrom, db
+    RelationshipTo, db
 )
-from neomodel.exceptions import UniqueProperty
 
 # Configure neomodel connection
 def setup_connection(uri: str, auth: Tuple[str, str]):
@@ -154,7 +174,7 @@ class Neo4jMemoryStore:
         """
         try:
             db.cypher_query(query)
-        except Exception as e:
+        except Exception:
             # Index might already exist
             pass
     

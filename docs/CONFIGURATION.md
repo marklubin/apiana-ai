@@ -130,16 +130,16 @@ chatgpt-export-process export.json --verbose
 You can also load configurations programmatically:
 
 ```python
-from apiana.configuration import ProcessorConfig
+from apiana.configuration import ChatGPTExportProcessorConfiguration
 
 # Load from environment
-config = ProcessorConfig.load_from_environment()
+config = ChatGPTExportProcessorConfiguration.load_from_environment()
 
 # Load from specific TOML file
-config = ProcessorConfig.from_toml("configs/production.toml")
+config = ChatGPTExportProcessorConfiguration.from_toml("configs/production.toml")
 
 # Load from JSON file
-config = ProcessorConfig.from_file("saved-config.json")
+config = ChatGPTExportProcessorConfiguration.from_file("saved-config.json")
 
 # Save configuration
 config.save_to_file("my-config.json")
