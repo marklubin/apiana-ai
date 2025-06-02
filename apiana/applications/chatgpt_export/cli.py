@@ -4,7 +4,6 @@ import json
 from apiana.batch.chatgpt.chatgpt_export_loader import ChatGPTExportLoader
 from apiana.batch.chatgpt.chatgpt_export_processor import ChatGPTExportProcessor
 from apiana.batch.summary.summary_generator import SummaryGenerator
-from apiana.types.chatgpt_conversation import ChatGPTConversation
 
 export_loader = ChatGPTExportLoader()
 export_processor = ChatGPTExportProcessor(export_loader)
@@ -31,10 +30,13 @@ def parse_conversations(input_file: str, output_dir: str):
 def generate_summaries(input_file: str, output: str):
     print(f"Generating summary for: {input_file}")
     with open(input_file) as f:
-        convo = ChatGPTConversation.from_dict(json.load(f))
-        print(convo)
+        data = json.load(f)
+        print(f"JSON data: {data}")
+        print("Calling LLM for summary generation...")
         generator = SummaryGenerator()
-        print(generator.generate(convo))
+        result = generator.generate(json.dumps(data))
+        print("Got response.")
+        print("Response was:" + result)
 
 
 def enrich_embeddings(input_file: str, output_dir: str):

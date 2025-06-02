@@ -25,6 +25,7 @@ dependencies = [
     "neomodel>=5.4.5",
     "numpy>=2.2.6",
     "openai>=1.82.1",
+    "pydevd-pycharm~=251.25410.159",
     "sentence-transformers>=4.1.0",
     "textual>=3.2.0",
     "torch>=2.7.0",
