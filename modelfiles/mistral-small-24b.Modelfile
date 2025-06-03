@@ -1,0 +1,30 @@
+# Modelfile for mistralai_Mistral-Small-24B-Base-2501
+FROM ./mistralai_Mistral-Small-24B-Base-2501
+
+# Model parameters for larger model
+PARAMETER temperature 0.7
+PARAMETER top_p 0.95
+PARAMETER top_k 50
+PARAMETER repeat_penalty 1.1
+
+# Larger context window for 24B model
+PARAMETER num_ctx 32768
+
+# GPU layers (adjust based on your GPU memory)
+PARAMETER num_gpu 40
+
+# System prompt
+SYSTEM """You are a knowledgeable and helpful AI assistant."""
+
+# Template for chat format (Latest Mistral format)
+TEMPLATE """{{ if .System }}<|im_start|>system
+{{ .System }}<|im_end|>
+{{ end }}{{ if .Prompt }}<|im_start|>user
+{{ .Prompt }}<|im_end|>
+<|im_start|>assistant
+{{ end }}{{ .Response }}<|im_end|>
+"""
+
+# Stop tokens
+PARAMETER stop "<|im_start|>"
+PARAMETER stop "<|im_end|>"

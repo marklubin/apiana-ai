@@ -1,0 +1,20 @@
+# Modelfile for osmosis-ai_osmosis-mcp-4b
+FROM ./osmosis-ai_osmosis-mcp-4b
+
+# Model parameters for smaller model
+PARAMETER temperature 0.8
+PARAMETER top_p 0.9
+PARAMETER top_k 40
+PARAMETER repeat_penalty 1.1
+
+# Context window
+PARAMETER num_ctx 4096
+
+# System prompt
+SYSTEM """You are Osmosis MCP, an AI assistant specialized in model context protocol interactions."""
+
+# Template - check the model card for specific format
+# This is a generic template, adjust based on the model's training
+TEMPLATE """{{ if .System }}{{ .System }}
+
+{{ end }}{{ if .Prompt }}Human: {{ .Prompt }}

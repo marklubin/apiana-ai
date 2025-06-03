@@ -1,0 +1,27 @@
+# Modelfile for mistralai_Mistral-7B-merged
+FROM ./mistralai_Mistral-7B-merged
+
+# Model parameters
+PARAMETER temperature 0.7
+PARAMETER top_p 0.9
+PARAMETER top_k 40
+PARAMETER repeat_penalty 1.1
+
+# Context window
+PARAMETER num_ctx 4096
+
+# System prompt (optional)
+SYSTEM """You are a helpful AI assistant."""
+
+# Template for chat format (Mistral uses ChatML format)
+TEMPLATE """{{ if .System }}<|im_start|>system
+{{ .System }}<|im_end|>
+{{ end }}{{ if .Prompt }}<|im_start|>user
+{{ .Prompt }}<|im_end|>
+<|im_start|>assistant
+{{ end }}{{ .Response }}<|im_end|>
+"""
+
+# Stop tokens
+PARAMETER stop "<|im_start|>"
+PARAMETER stop "<|im_end|>"

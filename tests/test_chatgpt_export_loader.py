@@ -3,16 +3,12 @@ import tempfile
 
 import pytest
 
-from apiana.batch.chatgpt.chatgpt_export_loader import ChatGPTExportLoader
+import apiana.batch.chatgpt.chatgpt_export_loader as loader
 
 
 class TestChatGPTExportLoader:
-    @pytest.fixture
-    def loader(self):
-        return ChatGPTExportLoader()
-
-    def test_load_empty_file(self, loader):
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
+    def test_load_empty_file(self):
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
             f.write("")
             temp_path = f.name
         try:
@@ -21,8 +17,8 @@ class TestChatGPTExportLoader:
         finally:
             os.unlink(temp_path)
 
-    def test_load_invalid_json(self, loader):
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
+    def test_load_invalid_json(self):
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
             f.write("invalid json")
             temp_path = f.name
         try:
@@ -31,9 +27,9 @@ class TestChatGPTExportLoader:
         finally:
             os.unlink(temp_path)
 
-    def test_load_non_list_structure(self, loader):
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
-            f.write("{\"title\": \"Test\"}")
+    def test_load_non_list_structure(self):
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
+            f.write('{"title": "Test"}')
             temp_path = f.name
         try:
             with pytest.raises(Exception):
@@ -41,9 +37,9 @@ class TestChatGPTExportLoader:
         finally:
             os.unlink(temp_path)
 
-    def test_load_missing_required_fields(self, loader):
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
-            f.write("{\"title\": \"Test\"}")
+    def test_load_missing_required_fields(self):
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
+            f.write('{"title": "Test"}')
             temp_path = f.name
         try:
             with pytest.raises(Exception):

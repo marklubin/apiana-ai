@@ -1,0 +1,21 @@
+# Model configured for concise responses
+FROM ./mistralai_Mistral-7B-merged
+
+# System prompt encouraging brevity
+SYSTEM """You are a helpful AI assistant. Provide concise, direct answers. Be brief but complete."""
+
+# Token limits
+PARAMETER num_ctx 4096        # Total context window
+PARAMETER num_predict 256     # Default max response tokens
+
+# Other parameters
+PARAMETER temperature 0.7
+PARAMETER top_p 0.9
+PARAMETER repeat_penalty 1.1
+
+# Add stop sequences to help control length
+PARAMETER stop "<|im_start|>"
+PARAMETER stop "<|im_end|>"
+PARAMETER stop "\n\n"         # Stop at double newline
+PARAMETER stop "In summary"   # Common ending phrase
+PARAMETER stop "To conclude"  # Common ending phrase

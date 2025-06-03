@@ -1,330 +1,60 @@
-"""
-Neo4j storage implementation using neomodel ORM for experiential summaries.
+from datetime import datetime
+from typing import List
 
-Database Structure:
-    The Apiana system uses Neo4j to store the following node types:
+from neomodel import config as neomodel_config
+from neomodel import db
 
-    1. ExperientialMemory - Stores actual conversation memories
-       - Properties: content, embedding, timestamp, context
-       - Relationships: RELATES_TO (other memories), TAGGED_WITH (tags)
-
-    2. ConceptualMemory - Abstract concepts derived from experiences
-       - Properties: concept, description, confidence
-       - Relationships: DERIVED_FROM (experiential memories)
-
-    3. ReflectiveMemory - Self-reflections and insights
-       - Properties: reflection, importance, timestamp
-       - Relationships: REFLECTS_ON (other memories)
-
-    4. ProcessorRun - Tracks batch processing runs
-       - Properties: run_id, status, configuration, statistics
-       - Relationships: GENERATED (memories created in this run)
-
-    5. Tag - Contextual tags for organizing memories
-       - Properties: name, category
-       - Relationships: TAGS (memories)
-"""
-
-from typing import List, Dict, Any, Tuple, Optional
-
-from neomodel import (
-    config, StructuredNode, StringProperty, DateTimeProperty,
-    ArrayProperty, FloatProperty, IntegerProperty, JSONProperty, 
-    RelationshipTo, db
-)
-
-# Configure neomodel connection
-def setup_connection(uri: str, auth: Tuple[str, str]):
-    """Setup neomodel database connection."""
-    username, password = auth
-    config.DATABASE_URL = f"bolt://{username}:{password}@{uri.split('://')[-1]}"
-
-
-class ExperientialSummary(StructuredNode):
-    """
-    Node model for experiential summaries.
-    
-    This model represents first-person narrative summaries of conversations,
-    designed to be extended with other memory types in the future.
-    """
-    # Required properties
-    conversation_id = StringProperty(required=True, index=True)
-    title = StringProperty(required=True)
-    content = StringProperty(required=True)
-    
-    # Embedding stored as array of floats
-    embedding = ArrayProperty(FloatProperty(), required=True)
-    
-    # Metadata
-    created_at = DateTimeProperty(default_now=True)
-    embedding_model = StringProperty(required=True)
-    message_count = IntegerProperty(default=0)
-    word_count = IntegerProperty()
-    
-    # Contextual tags (to be populated by separate agent)
-    emotional_context = JSONProperty()  # {"primary": "curious", "secondary": ["frustrated", "excited"], "intensity": 0.8}
-    environmental_context = JSONProperty()  # {"location": "home", "time_of_day": "evening", "weather": "rainy", "inferred": true}
-    activity_context = JSONProperty()  # {"activity": "debugging", "tools": ["python", "docker"], "domain": "software development"}
-    social_context = JSONProperty()  # {"interaction_type": "learning", "formality": "casual", "audience": "ai_assistant"}
-    
-    def save(self):
-        """Override save to auto-calculate word count."""
-        self.word_count = len(self.content.split()) if self.content else 0
-        return super().save()
-    
-    @classmethod
-    def create_from_summary(
-        cls,
-        conversation_id: str,
-        title: str,
-        content: str,
-        embedding: List[float],
-        embedding_model: str,
-        message_count: int = 0
-    ) -> 'ExperientialSummary':
-        """
-        Factory method to create an experiential summary.
-        
-        Args:
-            conversation_id: ID of source conversation
-            title: Conversation title
-            content: First-person summary
-            embedding: Vector embedding
-            embedding_model: Model used for embedding
-            message_count: Messages in original conversation
-            
-        Returns:
-            Created ExperientialSummary instance
-        """
-        summary = cls(
-            conversation_id=conversation_id,
-            title=title,
-            content=content,
-            embedding=embedding,
-            embedding_model=embedding_model,
-            message_count=message_count
-        )
-        summary.save()
-        return summary
-    
-    def to_dict(self) -> Dict[str, Any]:
-        """Convert to dictionary for API responses."""
-        return {
-            'id': self.element_id,
-            'conversation_id': self.conversation_id,
-            'title': self.title,
-            'content': self.content,
-            'created_at': self.created_at.isoformat() if self.created_at else None,
-            'message_count': self.message_count,
-            'word_count': self.word_count,
-            'emotional_context': self.emotional_context,
-            'environmental_context': self.environmental_context,
-            'activity_context': self.activity_context,
-            'social_context': self.social_context
-        }
+from apiana.types.common import Conversation
+from apiana.types.configuration import Neo4jConfig
+from apiana.types.memory_block import Block, Tag, Grounding
 
 
 class Neo4jMemoryStore:
-    """
-    High-level store for managing experiential summaries using neomodel.
-    """
-    
-    def __init__(
-        self,
-        uri: str,
-        auth: Tuple[str, str],
-        embedding_model: str = "nomic-embed-text",
-        embedding_dimension: int = 768
-    ):
-        """
-        Initialize store with Neo4j connection.
-        
-        Args:
-            uri: Neo4j URI (e.g., "bolt://localhost:7687")
-            auth: (username, password) tuple
-            embedding_model: Name of embedding model
-            embedding_dimension: Vector dimension
-        """
-        setup_connection(uri, auth)
-        self.embedding_model = embedding_model
-        self.embedding_dimension = embedding_dimension
-        self.vector_index_name = "experiential_summary_embeddings"
-        
-    def setup_schema(self):
-        """
-        Create vector index for similarity search.
-        
-        Note: Constraints are handled automatically by neomodel.
-        """
-        # Install all constraints and indexes from models
+    def __init__(self, config: Neo4jConfig):
+        config_url = (
+            f"bolt://{config.username}:{config.password}@{config.host}:{config.port}"
+        )
+        neomodel_config.DATABASE_URL = config_url
         db.install_all_labels()
-        
-        # Create vector index using raw Cypher
-        # (neomodel doesn't support vector indexes yet)
-        query = f"""
-        CREATE VECTOR INDEX {self.vector_index_name} IF NOT EXISTS
-        FOR (n:ExperientialSummary) 
-        ON n.embedding
-        OPTIONS {{
-            indexConfig: {{
-                `vector.dimensions`: {self.embedding_dimension},
-                `vector.similarity_function`: 'cosine'
-            }}
-        }}
-        """
-        try:
-            db.cypher_query(query)
-        except Exception:
-            # Index might already exist
-            pass
-    
-    def create_experiential_summary(
-        self,
-        conversation_id: str,
-        title: str,
-        content: str,
-        embedding: List[float],
-        message_count: int = 0
-    ) -> str:
-        """
-        Create an experiential summary.
-        
-        Args:
-            conversation_id: Source conversation ID
-            title: Conversation title
-            content: First-person narrative summary
-            embedding: Vector embedding
-            message_count: Number of messages
-            
-        Returns:
-            The element ID of created summary
-        """
-        summary = ExperientialSummary.create_from_summary(
-            conversation_id=conversation_id,
-            title=title,
-            content=content,
-            embedding=embedding,
-            embedding_model=self.embedding_model,
-            message_count=message_count
-        )
-        return summary.element_id
-    
-    def search_similar_summaries(
-        self,
-        query_embedding: List[float],
-        top_k: int = 10
-    ) -> List[Dict[str, Any]]:
-        """
-        Search for similar summaries using vector similarity.
-        
-        Args:
-            query_embedding: Query vector
-            top_k: Number of results
-            
-        Returns:
-            List of summaries with similarity scores
-        """
-        query = """
-        CALL db.index.vector.queryNodes($index_name, $top_k, $query_embedding)
-        YIELD node, score
-        MATCH (es:ExperientialSummary)
-        WHERE elementId(es) = elementId(node)
-        RETURN es, score
-        ORDER BY score DESC
-        """
-        
-        results, _ = db.cypher_query(
-            query,
-            {
-                'index_name': self.vector_index_name,
-                'top_k': top_k,
-                'query_embedding': query_embedding
-            }
-        )
-        
-        return [
-            {
-                'summary': ExperientialSummary.inflate(row[0]).to_dict(),
-                'score': row[1]
-            }
-            for row in results
-        ]
-    
-    def update_contextual_tags(
-        self,
-        summary_id: str,
-        emotional_context: Optional[Dict[str, Any]] = None,
-        environmental_context: Optional[Dict[str, Any]] = None,
-        activity_context: Optional[Dict[str, Any]] = None,
-        social_context: Optional[Dict[str, Any]] = None
-    ) -> bool:
-        """
-        Update contextual tags for an existing summary.
-        
-        This allows the contextual tagging agent to run separately
-        and update summaries with extracted context.
-        
-        Args:
-            summary_id: Element ID of the summary to update
-            emotional_context: Emotional state data
-            environmental_context: Location/time/weather data
-            activity_context: Activity and domain data
-            social_context: Interaction type data
-            
-        Returns:
-            True if update successful
-        """
-        # TODO: Implement update logic
-        # This will be used by the separate contextual tagging agent
-        pass
 
+    def store_convo(
+        self,
+        conversation: Conversation,
+        summary: str,
+        embeddings: List[float],
+        tags: List[str],
+    ) -> Block:
+        # Get or create Tag nodes
+        now = datetime.utcnow()
+        db_tags = {}
+        for tag_name in tags:
+            # Try to get existing tag first
+            existing_tags = Tag.nodes.filter(name=tag_name)
+            if existing_tags:
+                db_tags[tag_name] = existing_tags[0]
+            else:
+                # Create new tag with timestamp
+                db_tags[tag_name] = Tag(name=tag_name, created_at=now).save()
 
-class ProcessorRun(StructuredNode):
-    """
-    Node model for tracking processor runs.
-    
-    Stores configuration and metadata for each batch processing run.
-    """
-    # Unique run ID
-    run_id = StringProperty(required=True, unique_index=True)
-    
-    # Configuration
-    prompt_name = StringProperty(required=True)
-    prompt_files = JSONProperty(required=True)  # Stores system and user prompt filenames
-    embedder_config = JSONProperty(required=True)
-    llm_provider_config = JSONProperty(required=True)
-    
-    # Run metadata
-    created_at = DateTimeProperty(default_now=True)
-    completed_at = DateTimeProperty()
-    status = StringProperty(default="running")  # running, completed, failed
-    
-    # Statistics
-    total_conversations = IntegerProperty(default=0)
-    successful_summaries = IntegerProperty(default=0)
-    failed_summaries = IntegerProperty(default=0)
-    duration_seconds = FloatProperty()
-    
-    # Output location
-    output_directory = StringProperty()
-    
-    # Relationships
-    summaries = RelationshipTo('ExperientialSummary', 'GENERATED')
-    
-    def to_dict(self) -> Dict[str, Any]:
-        """Convert to dictionary.
-        
-        Note: This is a neomodel StructuredNode, not a dataclass,
-        so we need a custom to_dict method for serialization.
-        """
-        return {
-            'run_id': self.run_id,
-            'prompt_name': self.prompt_name,
-            'status': self.status,
-            'created_at': self.created_at.isoformat() if self.created_at else None,
-            'completed_at': self.completed_at.isoformat() if self.completed_at else None,
-            'total_conversations': self.total_conversations,
-            'successful_summaries': self.successful_summaries,
-            'failed_summaries': self.failed_summaries,
-            'output_directory': self.output_directory
-        }
+        grounding = Grounding.get_or_create(
+            {
+                "external_id": conversation.openai_conversation_id,
+                "external_label": conversation.title,
+                "external_source": "conversation",
+            }
+        )[0]
+
+        # Create a parent Block for the conversation
+        block = Block(
+            content=summary,
+            created_at=now,
+            updated_at=now,
+            embedding_v1=embeddings,
+            tags=db_tags,
+            block_type="experience",
+            experience_type="conversation",
+        ).save()
+
+        block.grounded_by.connect(grounding)
+        [block.tagged_with.connect(tag) for tag in db_tags.values()]
+        return block

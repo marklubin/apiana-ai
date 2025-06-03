@@ -1,122 +1,135 @@
 import argparse
 import json
+import logging
+import os
+from typing import List
 
-from apiana.batch.chatgpt.chatgpt_export_loader import ChatGPTExportLoader
-from apiana.batch.chatgpt.chatgpt_export_processor import ChatGPTExportProcessor
-from apiana.batch.summary.summary_generator import SummaryGenerator
+from neo4j_graphrag.embeddings.sentence_transformers import (
+    SentenceTransformerEmbeddings,
+)
+from neo4j_graphrag.llm.openai_llm import OpenAILLM
 
-export_loader = ChatGPTExportLoader()
-export_processor = ChatGPTExportProcessor(export_loader)
+from apiana import runtime_config
+from apiana.batch.chatgpt.chatgpt_export_parsing import convo_from_export_format_dict
+from apiana.storage.neo4j_store import Neo4jMemoryStore
+from apiana.types.common import Conversation
+
+log = logging.getLogger(__name__)
 
 
-def parse_conversations_menu():
-    input_file = input("Enter input file path: ").strip()
-    output_dir = input("Enter output directory: ").strip()
-    print(
-        f"Processing conversations with input file: {input_file} and output directory: {output_dir}"
+def get_dependencies():
+    """Initialize and return dependencies. This allows for easier testing."""
+    memory_store = Neo4jMemoryStore(runtime_config.neo4j)
+    summarizer = OpenAILLM(
+        runtime_config.summarizer.model_name,
+        {
+            "temperature": runtime_config.summarizer.temperature,
+            "max_tokens": runtime_config.summarizer.max_tokens,
+        },
+        base_url=runtime_config.summarizer.inference_provider_config.base_url,
     )
-    export_processor.extract_convos_with_persist(input_file, output_dir)
-    print("Finished processing conversations.")
-
-
-def parse_conversations(input_file: str, output_dir: str):
-    print(
-        f"Processing conversations with input file: {input_file} and output directory: {output_dir}"
+    embedder = SentenceTransformerEmbeddings(
+        runtime_config.embedding_model_name, trust_remote_code=True
     )
-    export_processor.extract_convos_with_persist(input_file, output_dir)
-    print("Finished processing conversations.")
+    return memory_store, summarizer, embedder
 
 
-def generate_summaries(input_file: str, output: str):
-    print(f"Generating summary for: {input_file}")
+def write_convos_in_apiana_format(convos: List[Conversation], output_dir: str):
+    parsed_dir = os.path.join(output_dir, "parsed")
+    os.makedirs(parsed_dir, exist_ok=True)
+    for i, c in enumerate(convos):
+        # Sanitize filename - replace problematic characters
+        safe_title = c.title.replace(" ", "_").replace("/", "_").replace(":", "_")
+        safe_title = "".join(
+            char for char in safe_title if char.isalnum() or char in ("_", "-", ".")
+        )
+        output_file_name = f"{i}_{safe_title.lower()}.json"
+        output_path = os.path.join(parsed_dir, output_file_name)
+        output = c.to_json(indent=2)
+        with open(output_path, "w") as f:
+            f.write(output)
+            log.info(f"Wrote {output_path} - {i + 1}/{len(convos)}")
+
+
+def process_one_conversation(
+    convo: Conversation,
+    output_dir: str,
+    memory_store=None,
+    summarizer=None,
+    embedder=None,
+):
+    """Process a single conversation. Dependencies can be injected for testing."""
+    if memory_store is None or summarizer is None or embedder is None:
+        memory_store, summarizer, embedder = get_dependencies()
+
+    log.info(f"Embedding convo for {convo}, calling llm.")
+    prompt = f"{runtime_config.summarizer.prompt_config.userprompt_template}\n\n{convo.to_json(indent=2)}"
+    system = runtime_config.summarizer.prompt_config.system_prompt
+    summary = summarizer.invoke(prompt, system_instruction=system).content
+
+    # Sanitize filename - same logic as write_convos_in_apiana_format
+    safe_title = convo.title.replace(" ", "_").replace("/", "_").replace(":", "_")
+    safe_title = "".join(
+        char for char in safe_title if char.isalnum() or char in ("_", "-", ".")
+    )
+    output_file_name = f"{safe_title.lower()}.txt"
+    output_path = os.path.join(output_dir, output_file_name)
+
+    with open(output_path, "w") as f:
+        f.write(summary)
+        log.info(f"Wrote {output_path}")
+
+    log.info("Calling embedder.")
+    vector = embedder.embed_query(summary)
+    log.info("Received emedding vector, persisting to graph")
+    memory_store.store_convo(convo, summary, vector, [])
+
+
+def embedded_chatgpt_export_summaries(
+    input_file: str, output_dir: str, memory_store=None, summarizer=None, embedder=None
+):
+    """Main processing function. Dependencies can be injected for testing."""
+    log.info("Starting...")
+    apiana_convos = []
     with open(input_file) as f:
         data = json.load(f)
-        print(f"JSON data: {data}")
-        print("Calling LLM for summary generation...")
-        generator = SummaryGenerator()
-        result = generator.generate(json.dumps(data))
-        print("Got response.")
-        print("Response was:" + result)
+    log.info("Read json file, starting to convert to Apiana format.")
 
+    for c in data:
+        apiana_convo = convo_from_export_format_dict(c)
+        apiana_convos.append(apiana_convo)
 
-def enrich_embeddings(input_file: str, output_dir: str):
-    print(f"Enriching embeddings for: {input_file}, output to: {output_dir}")
-    # TODO: Implement embedding enrichment
-    print("Embedding enrichment not yet implemented.")
+    log.info("Writing out Apiana convos.")
+    write_convos_in_apiana_format(apiana_convos, output_dir)
+    log.info("Wrote convos.")
 
+    summaries_dir = os.path.join(output_dir, "summaries")
+    os.makedirs(summaries_dir, exist_ok=True)
 
-def interactive_menu():
-    # CLI loop to select a tool from a menu
-    while True:
-        print("\n=== Apiana ChatGPT Export CLI ===")
-        print("1. Parse Conversations")
-        print("2. Generate Summaries")
-        print("3. Enrich and store embeddings")
-        print("4. Exit")
+    for i, c in enumerate(apiana_convos):
+        process_one_conversation(c, summaries_dir, memory_store, summarizer, embedder)
 
-        choice = input("Enter your choice (1-4): ").strip()
-
-        if choice == "1":
-            parse_conversations_menu()
-        elif choice == "2":
-            # Export summary
-            print("Exporting summary...")
-        elif choice == "3":
-            # Enrich/Store data
-            print("Enriching and storing data...")
-        elif choice == "4":
-            print("Exiting the CLI loop.")
-            break
-        else:
-            print("Invalid choice. Please try again.")
+    log.info("Extraction finished!")
 
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Apiana ChatGPT Export CLI - Process ChatGPT conversation exports",
-        epilog="If no subcommand is provided, the interactive menu will be shown.",
+        description="Process ChatGPT export files and generate embeddings"
     )
-
-    subparsers = parser.add_subparsers(dest="command", help="Available commands")
-
-    # Parse subcommand
-    parse_parser = subparsers.add_parser("parse", help="Parse ChatGPT conversations")
-    parse_parser.add_argument(
-        "-i", "--input", required=True, help="Input JSON file path"
+    parser.add_argument(
+        "-i", "--input", required=True, help="Input file path (ChatGPT export JSON)"
     )
-    parse_parser.add_argument(
-        "-o", "--output", required=True, help="Output directory path"
-    )
-
-    # Summary subcommand
-    summary_parser = subparsers.add_parser(
-        "summary", help="Generate conversation summaries"
-    )
-    summary_parser.add_argument("-i", "--input", required=True, help="Input file path")
-    summary_parser.add_argument(
-        "-o", "--output", required=True, help="Output directory path"
-    )
-
-    # Enrich subcommand
-    enrich_parser = subparsers.add_parser(
-        "enrich", help="Enrich conversations with embeddings"
-    )
-    enrich_parser.add_argument("-i", "--input", required=True, help="Input file path")
-    enrich_parser.add_argument(
-        "-o", "--output", required=True, help="Output directory path"
+    parser.add_argument(
+        "-o",
+        "--output",
+        required=True,
+        help="Output directory for parsed conversations and summaries",
     )
 
     args = parser.parse_args()
 
-    if args.command == "parse":
-        parse_conversations(args.input, args.output)
-    elif args.command == "summary":
-        generate_summaries(args.input, args.output)
-    elif args.command == "enrich":
-        enrich_embeddings(args.input, args.output)
-    else:
-        # No subcommand provided, show interactive menu
-        interactive_menu()
+    # Invoke the function with parsed arguments
+    embedded_chatgpt_export_summaries(args.input, args.output)
 
 
 if __name__ == "__main__":

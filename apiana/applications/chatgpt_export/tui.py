@@ -1,33 +1,33 @@
 from textual.app import App
+from textual.errors import RenderError
 from textual.reactive import reactive
 from textual.widget import Widget
 from textual.widgets import (
-    Static,
+    DataTable,
     DirectoryTree,
     LoadingIndicator,
-    DataTable,
+    Static,
     TextArea,
 )
-from textual.errors import RenderError
 
 
 class FilteredDirectoryTree(DirectoryTree):
     @classmethod
-    def hidden_file_filter(path):
+    def hidden_file_filter(cls, path):
         """Filter function to exclude hidden files and directories."""
         return not path.name.startswith(".")
 
     @classmethod
-    def all_files_filter(path):
+    def all_files_filter(cls, path):
         """Filter function to include all files."""
         return path.is_file()
 
-    def __init__(self, path, filter):
+    def __init__(self, path, fn):
         super().__init__(path)
-        self.filter = filter
+        self.fn = fn
 
     def filter_paths(self, paths):
-        return [path for path in paths if not self.filter(path)]
+        return [path for path in paths if not self.fn(path)]
 
 
 class FilePicker(Widget):
@@ -56,6 +56,7 @@ class ChatGPTExportProcessor(App):
     input_filename = reactive(None)
     validated_convos = reactive([])
     system_prompt_filename = reactive(None)
+    prompt_text = reactive(None)
 
     def on_mount(self):
         self.theme = "solarized-light"

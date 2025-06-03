@@ -17,6 +17,10 @@ uv run gpt-export-tui
 # or
 uv run python main.py
 
+# Run the Gradio Web UI for ChatGPT Export processing
+uv run python launch_ui.py
+# Opens web interface at http://localhost:7860
+
 # Run with hot reload during development
 uv run textual run --dev apiana/applications/chatgpt_export/tui.py
 

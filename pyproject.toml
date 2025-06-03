@@ -19,13 +19,15 @@ requires-python = ">=3.13"
 
 dependencies = [
     "atomics>=1.0.3",
+    "einops>=0.8.1",
+    "gradio>=5.32.1",
     "injector>=0.22.0",
     "neo4j>=5.28.1",
     "neo4j-graphrag>=1.7.0",
     "neomodel>=5.4.5",
     "numpy>=2.2.6",
     "openai>=1.82.1",
-    "pydevd-pycharm~=251.25410.159",
+    "pydantic>=2.11.5",
     "sentence-transformers>=4.1.0",
     "textual>=3.2.0",
     "torch>=2.7.0",
@@ -35,6 +37,7 @@ dependencies = [
 [project.scripts]
 chatgpt-export = "apiana.applications.chatgpt_export.cli:main"
 chatgpt-export-tui = "apiana.applications.chatgpt_export.tui:main"
+gradio-ui="apiana.applications.gradio_ui:launch_ui"
 
 [tool.uv.sources]
 apiana = { workspace = true }
@@ -57,4 +60,18 @@ dev = [
     "textual-dev>=1.7.0",
     "debugpy>=1.8.14",
     "pytest>=8.3.5",
+    "pytest-env>=1.1.5",
+    "testcontainers[neo4j]>=4.10.0",
 ]
+
+[tool.pytest.ini_options]
+# Always run tests with unit-test environment
+env = [
+    "APIANA_ENV_STAGE=unit-test"
+]
+markers = [
+    "integration: marks tests as integration tests (deselect with '-k \"not integration\"')"
+]
+testpaths = ["tests"]
+# Default behavior: run only unit tests
+addopts = "-v -k 'not integration' --ignore=scripts/"
