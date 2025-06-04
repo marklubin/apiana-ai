@@ -2,7 +2,6 @@
 """
 Dynamic Modelfile generator that loads system prompts from external files
 """
-import os
 import argparse
 from pathlib import Path
 
@@ -162,7 +161,7 @@ def main():
                 temperature=args.temperature,
                 num_predict=args.max_tokens
             )
-            print(f"\nTo create the model, run:")
+            print("\nTo create the model, run:")
             print(f"ollama create {args.model_name} -f {output_path}")
         except Exception as e:
             print(f"Error: {e}")

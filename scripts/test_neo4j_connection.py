@@ -4,7 +4,7 @@ Test Neo4j connection and check stored data
 """
 from neomodel import db
 from apiana import runtime_config
-from apiana.storage.neo4j_store import Neo4jMemoryStore
+from apiana.storage.neo4j_store import AgentMemoryStore
 from apiana.types.memory_block import Block, Tag, Grounding
 
 def test_neo4j_connection():
@@ -13,7 +13,7 @@ def test_neo4j_connection():
     print("=" * 40)
     
     # Show configuration
-    print(f"Neo4j Config:")
+    print("Neo4j Config:")
     print(f"  Host: {runtime_config.neo4j.host}")
     print(f"  Port: {runtime_config.neo4j.port}")
     print(f"  Database: {runtime_config.neo4j.database}")
@@ -22,7 +22,7 @@ def test_neo4j_connection():
     
     try:
         # Initialize store
-        memory_store = Neo4jMemoryStore(runtime_config.neo4j)
+        memory_store = AgentMemoryStore(runtime_config.neo4j)
         print("✅ Successfully connected to Neo4j")
         
         # Test basic query

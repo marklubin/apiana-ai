@@ -1,146 +1,231 @@
 # Configuration Guide
 
-Apiana AI supports multiple configuration environments to handle different deployment scenarios.
+Apiana AI uses a flexible configuration system based on dataclasses with support for Neo4j connection settings, LLM providers, and pipeline parameters.
 
-## Environment-Based Configuration
+## Core Configuration Classes
 
-The system uses the `APIANA_ENVIRONMENT_STAGE` environment variable to determine which configuration file to load.
+### Neo4jConfig
 
-### Available Environments
+Manages connection to Neo4j database (Community Edition supported):
 
-1. **local** (default)
-   - Everything runs on the local machine
-   - Uses local Ollama instance for LLM
-   - Uses local Neo4j database
-   - Configuration file: `configs/local.toml`
+```python
+from apiana.types.configuration import Neo4jConfig
 
-2. **dev**
-   - Uses remote development services
-   - Can connect to shared Ollama/Neo4j instances
-   - Configuration file: `configs/dev.toml`
-
-3. **production**
-   - Uses 3rd party APIs (OpenAI)
-   - Uses hosted services (Neo4j Aura)
-   - Configuration file: `configs/production.toml`
-
-### Setting the Environment
-
-```bash
-# Use local configuration (default)
-chatgpt-export-process export.json
-
-# Use development configuration
-export APIANA_ENVIRONMENT_STAGE=dev
-chatgpt-export-process export.json
-
-# Use production configuration
-export APIANA_ENVIRONMENT_STAGE=production
-chatgpt-export-process export.json
-
-# Or inline for a single command
-APIANA_ENVIRONMENT_STAGE=production chatgpt-export-process export.json
+config = Neo4jConfig(
+    username="neo4j",
+    password="password",
+    host="localhost",
+    port=7687,
+    database=None  # Uses default 'neo4j' database
+)
 ```
 
-## Configuration Files
+### Pipeline Configuration
 
-Configuration files are stored in the `configs/` directory and use TOML format.
+Pipelines are configured through their factory functions in `pipelines.py`:
 
-### Environment Variable Substitution
+```python
+from pipelines import chatgpt_full_processing_pipeline
+from apiana.types.configuration import Neo4jConfig
 
-Configuration files support environment variable substitution using the `${VAR_NAME}` syntax:
-
-```toml
-[llm_provider]
-api_key = "${OPENAI_API_KEY}"
-
-[neo4j]
-uri = "${NEO4J_URI}"
-username = "${NEO4J_USERNAME}"
-password = "${NEO4J_PASSWORD}"
-```
-
-### Configuration Structure
-
-```toml
-[general]
-environment = "local"
-batch_size = 10
-output_base_dir = "output"
-
-[prompt]
-name = "default"
-system_prompt_file = "prompts/self-reflective-system-message.txt"
-user_prompt_template_file = "prompts/self-reflective-prompt-template.txt"
-
-[llm_provider]
-model = "llama3.2"
-base_url = "http://localhost:11434/v1"
-api_key = "ollama"
-temperature = 0.7
-max_tokens = 4096
-
-[embedder]
-type = "local"
-model = "nomic-ai/nomic-embed-text-v1"
-dimension = 768
-
-[neo4j]
-uri = "bolt://localhost:7687"
-username = "neo4j"
-password = "password"
+pipeline = chatgpt_full_processing_pipeline(
+    neo4j_config=config,
+    agent_id="my_agent",
+    input_file=Path("export.json"),
+    llm_model="microsoft/DialoGPT-small",  # Local model
+    embedding_model="sentence-transformers/all-MiniLM-L6-v2",
+    max_tokens=5000,
+    min_messages=2
+)
 ```
 
 ## Command-Line Interface
 
-The `chatgpt-export-process` command provides direct access to the export processor:
+### ChatGPT Export CLI (v2)
 
-### Basic Usage
-
-```bash
-chatgpt-export-process export.json
-```
-
-### Options
-
-- `-c, --config PATH`: Use a custom configuration file
-- `-o, --output-dir DIR`: Override the output directory
-- `-b, --batch-size N`: Override the batch size
-- `-v, --verbose`: Enable verbose logging
-- `--dry-run`: Show configuration without processing
-
-### Examples
+The new modular CLI provides flexible configuration:
 
 ```bash
-# Process with custom config
-chatgpt-export-process export.json --config my-config.toml
+# Basic usage with defaults
+uv run chatgpt-export-v2 -i export.json -o output/
 
-# Override output directory
-chatgpt-export-process export.json --output-dir ./results
+# With custom Neo4j settings
+uv run chatgpt-export-v2 -i export.json -o output/ \
+    --neo4j-host localhost \
+    --neo4j-port 7687 \
+    --neo4j-password mypassword
 
-# Dry run to check configuration
-chatgpt-export-process export.json --dry-run
+# Using local LLM
+uv run chatgpt-export-v2 -i export.json -o output/ \
+    --local-llm microsoft/DialoGPT-small \
+    --quantize-4bit
 
-# Verbose mode for debugging
-chatgpt-export-process export.json --verbose
+# Custom processing parameters
+uv run chatgpt-export-v2 -i export.json -o output/ \
+    --max-tokens 8000 \
+    --min-messages 3 \
+    --agent-id custom_agent
 ```
 
-## Programmatic Usage
+### Environment Variables
 
-You can also load configurations programmatically:
+The system supports environment variables for sensitive configuration:
+
+```bash
+# Neo4j settings
+export NEO4J_URI=bolt://localhost:7687
+export NEO4J_USERNAME=neo4j
+export NEO4J_PASSWORD=password
+
+# Run with environment config
+uv run chatgpt-export-v2 -i export.json -o output/
+```
+
+## Gradio Web UI Configuration
+
+The Gradio application automatically discovers pipelines and generates UI based on their parameters:
 
 ```python
-from apiana.configuration import ChatGPTExportProcessorConfiguration
+# In pipelines.py, add metadata for UI generation
+PIPELINE_REGISTRY = {
+    "my_pipeline": PipelineMetadata(
+        name="My Custom Pipeline",
+        description="Description for UI",
+        category="Processing",
+        input_parameters={
+            "param1": {"type": "string", "default": "value"},
+            "param2": {"type": "integer", "default": 10}
+        }
+    )
+}
+```
 
-# Load from environment
-config = ChatGPTExportProcessorConfiguration.load_from_environment()
+## Storage Configuration
 
-# Load from specific TOML file
-config = ChatGPTExportProcessorConfiguration.from_toml("configs/production.toml")
+### ApplicationStore
 
-# Load from JSON file
-config = ChatGPTExportProcessorConfiguration.from_file("saved-config.json")
+For shared data storage:
 
-# Save configuration
-config.save_to_file("my-config.json")
+```python
+from apiana.stores import ApplicationStore
+from apiana.types.configuration import Neo4jConfig
+
+config = Neo4jConfig(username="neo4j", password="password")
+store = ApplicationStore(config)
+```
+
+### AgentMemoryStore
+
+For agent-specific memories (automatically tags with agent_id):
+
+```python
+from apiana.stores import AgentMemoryStore
+
+# Each agent gets filtered memories in the shared database
+agent_store = AgentMemoryStore(config, agent_id="agent_123")
+```
+
+## Provider Configuration
+
+### Local LLM Providers
+
+```python
+from apiana.core.providers.local import LocalTransformersLLM
+
+# Using Transformers models
+llm = LocalTransformersLLM(
+    model_name="microsoft/DialoGPT-small",
+    device="auto",  # or "cpu", "cuda"
+    quantize_4bit=True  # Optional quantization
+)
+```
+
+### OpenAI-Compatible Providers
+
+```python
+from apiana.core.providers.openai import OpenAILLM
+
+# Works with OpenAI, Ollama, or any compatible API
+llm = OpenAILLM(
+    model="gpt-4",
+    api_key="your-key",
+    base_url="https://api.openai.com/v1",  # or http://localhost:11434/v1 for Ollama
+    temperature=0.7,
+    max_tokens=4096
+)
+```
+
+## Docker Configuration
+
+The project includes docker-compose for Neo4j:
+
+```yaml
+# docker-compose.yml
+services:
+  neo4j:
+    image: neo4j:5-community
+    environment:
+      - NEO4J_AUTH=neo4j/password
+    ports:
+      - "7474:7474"  # Web interface
+      - "7687:7687"  # Bolt protocol
+```
+
+Start with: `docker-compose up -d`
+
+## Testing Configuration
+
+Run different test suites:
+
+```bash
+# Unit tests only (default)
+make test
+
+# Integration tests (requires Neo4j)
+make test-integ
+
+# UI automation tests (requires Playwright)
+make test-ui
+
+# All tests with environment checks
+make test-comprehensive
+```
+
+## Best Practices
+
+1. **Use environment variables** for sensitive data (passwords, API keys)
+2. **Start with defaults** - Most parameters have sensible defaults
+3. **Use local models** for privacy-sensitive data
+4. **Configure agent_id** consistently across your application
+5. **Monitor pipeline runs** using the PipelineRunManager
+
+## Common Configurations
+
+### Development Setup
+
+```python
+config = Neo4jConfig()  # Uses localhost defaults
+pipeline = chatgpt_fragment_only_pipeline(
+    neo4j_config=config,
+    input_file=Path("test.json"),
+    min_messages=1,  # Process all conversations
+    tags=["dev", "test"]
+)
+```
+
+### Production Setup
+
+```python
+config = Neo4jConfig(
+    host=os.getenv("NEO4J_HOST"),
+    password=os.getenv("NEO4J_PASSWORD")
+)
+
+pipeline = chatgpt_full_processing_pipeline(
+    neo4j_config=config,
+    agent_id=os.getenv("AGENT_ID"),
+    input_file=Path(input_path),
+    llm_model="gpt-4",  # Using OpenAI
+    run_name=f"Production Run {datetime.now()}"
+)
 ```
