@@ -14,7 +14,8 @@ help:
 	@echo "Testing:"
 	@echo "  make test           - Run unit tests only (default)"
 	@echo "  make test-integ     - Run integration tests only"
-	@echo "  make test-all       - Run all tests"
+	@echo "  make test-ui        - Run UI automation tests using Playwright"
+	@echo "  make test-all       - Run all tests (unit + integration + ui)"
 	@echo ""
 	@echo "Ollama Model Management:"
 	@echo "  make setup          - Create directories and sample prompts"
@@ -41,10 +42,23 @@ test-integ:
 	@echo "Running integration tests..."
 	@uv run pytest -v -k "integration" --ignore=scripts/
 
+.PHONY: test-ui
+test-ui:
+	@echo "Running UI automation tests..."
+	@echo "Installing Playwright browsers if needed..."
+	@uv run playwright install chromium --with-deps
+	@echo "Starting UI automation tests..."
+	@uv run pytest tests/ui_automation/ -v -m "ui_automation" -k ""
+
 .PHONY: test-all
 test-all:
 	@echo "Running all tests..."
 	@uv run pytest -v --ignore=scripts/ -k ""
+
+.PHONY: test-comprehensive
+test-comprehensive:
+	@echo "Running comprehensive test suite with environment checks..."
+	@uv run python run_all_tests.py
 
 .PHONY: setup
 setup:

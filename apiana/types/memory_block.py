@@ -52,6 +52,9 @@ class Block(StructuredNode):
     reflection = StringProperty()
     importance = FloatProperty()
     metadata = ArrayProperty()
+    
+    # Agent identifier for filtering memories by agent
+    agent_id = StringProperty(index=True)
 
     # ------------------------------------------------------------------------------
     # Relationships

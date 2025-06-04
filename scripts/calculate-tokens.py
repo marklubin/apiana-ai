@@ -52,8 +52,8 @@ for file_path in files_to_check:
 # Find the largest
 if results:
     largest = max(results, key=lambda x: x['estimated_tokens'])
-    print(f"\n" + "=" * 50)
-    print(f"LARGEST CONVERSATION:")
+    print("\n" + "=" * 50)
+    print("LARGEST CONVERSATION:")
     print(f"File: {largest['file']}")
     print(f"Estimated Tokens: {largest['estimated_tokens']:,}")
     
@@ -64,7 +64,7 @@ if results:
     
     required_ctx = largest['estimated_tokens'] + system_prompt_tokens + safety_margin + response_tokens
     
-    print(f"\nContext Window Requirements:")
+    print("\nContext Window Requirements:")
     print(f"Conversation: {largest['estimated_tokens']:,} tokens")
     print(f"System Prompt: {system_prompt_tokens:,} tokens")
     print(f"Response Space: {response_tokens:,} tokens")

@@ -3,7 +3,6 @@
 Ollama wrapper that automatically includes system messages
 """
 import json
-import sys
 import requests
 import argparse
 
