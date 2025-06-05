@@ -2,7 +2,7 @@
 
 import logging
 import time
-from typing import TypeVar, Generic, Callable, Protocol, List, Optional
+from typing import TypeVar, Generic, Callable, Protocol, List, Optional, Any
 from dataclasses import dataclass
 from datetime import datetime
 
@@ -44,15 +44,24 @@ class BatchConfig:
     timeout: Optional[float] = None
 
 
+@dataclass
+class ProcessingItem(Generic[T]):
+    """Internal wrapper for tracking items during processing."""
+    original_index: int
+    item: T
+    hash_key: str
+    cached_result: Optional[Any] = None  # Will hold type R at runtime
+
+
 class BatchInferenceTransform(Component, Generic[T, R]):
     """
     Generic batch inference transform that:
     1. Accepts collections of inputs
-    2. Processes in batches of size N
-    3. Handles retries for failed batches
-    4. Returns complete results in order
-    
-    Note: Hash-based deduplication is planned but not yet implemented.
+    2. Computes hash keys for deduplication
+    3. Checks cache for existing results
+    4. Processes only uncached items in batches
+    5. Stores results immediately after processing
+    6. Returns complete results in original order
     """
     
     def __init__(
@@ -86,7 +95,7 @@ class BatchInferenceTransform(Component, Generic[T, R]):
         return [list]  # List[R]
     
     def process(self, inputs: List[T]) -> ComponentResult:
-        """Process input items in batches.
+        """Process input items in batches with deduplication.
         
         Args:
             inputs: List of items to process
@@ -105,21 +114,27 @@ class BatchInferenceTransform(Component, Generic[T, R]):
                 timestamp=datetime.utcnow()
             )
         
-        # Partition inputs into batches
-        batches = self._partition_into_batches(inputs)
-        results = []
+        # Step 1: Hash all inputs and create processing items
+        processing_items = self._create_processing_items(inputs)
         
-        # Process each batch with retry logic
-        for i, batch in enumerate(batches):
+        # Step 2: Check cache for existing results
+        cached_count = self._check_cache(processing_items)
+        
+        # Step 3: Filter items that need processing
+        items_to_process = [item for item in processing_items if item.cached_result is None]
+        
+        # Step 4: Process uncached items in batches
+        if items_to_process:
             try:
-                batch_results = self._process_batch_with_retry(batch)
-                results.extend(batch_results)
+                self._process_uncached_items(items_to_process)
             except Exception as e:
-                error_msg = f"Failed to process batch {i+1}/{len(batches)}: {str(e)}"
+                error_msg = f"Batch processing failed: {str(e)}"
                 logger.error(error_msg)
                 errors.append(error_msg)
-                # Re-raise with context
-                raise RuntimeError(error_msg) from e
+                raise
+        
+        # Step 5: Collect all results in original order
+        results = self._collect_results(processing_items)
         
         execution_time_ms = (time.time() - start_time) * 1000
         
@@ -127,14 +142,119 @@ class BatchInferenceTransform(Component, Generic[T, R]):
             data=results,
             metadata={
                 "total_items": len(inputs),
-                "batch_count": len(batches),
-                "batch_size": self.batch_config.batch_size
+                "cached_items": cached_count,
+                "processed_items": len(items_to_process),
+                "batch_count": (len(items_to_process) + self.batch_config.batch_size - 1) // self.batch_config.batch_size if items_to_process else 0,
+                "batch_size": self.batch_config.batch_size,
+                "cache_hit_rate": (cached_count / len(inputs) * 100) if inputs else 0
             },
             errors=errors,
             warnings=warnings,
             execution_time_ms=execution_time_ms,
             timestamp=datetime.utcnow()
         )
+    
+    def _create_processing_items(self, inputs: List[T]) -> List[ProcessingItem[T]]:
+        """Create processing items with hash keys.
+        
+        Args:
+            inputs: Original input items
+            
+        Returns:
+            List of ProcessingItem wrappers
+        """
+        processing_items = []
+        for i, item in enumerate(inputs):
+            hash_key = self.batch_config.hash_function(item)
+            processing_items.append(ProcessingItem(
+                original_index=i,
+                item=item,
+                hash_key=hash_key
+            ))
+        
+        logger.debug(f"Created {len(processing_items)} processing items with hash keys")
+        return processing_items
+    
+    def _check_cache(self, processing_items: List[ProcessingItem[T]]) -> int:
+        """Check cache for existing results.
+        
+        Args:
+            processing_items: Items to check in cache
+            
+        Returns:
+            Number of items found in cache
+        """
+        cached_count = 0
+        
+        for item in processing_items:
+            cached_result = self.store.get_by_hash(item.hash_key)
+            if cached_result is not None:
+                item.cached_result = cached_result
+                cached_count += 1
+                logger.debug(f"Cache hit for hash key: {item.hash_key}")
+        
+        logger.info(f"Found {cached_count}/{len(processing_items)} items in cache")
+        return cached_count
+    
+    def _process_uncached_items(self, items_to_process: List[ProcessingItem[T]]) -> None:
+        """Process items that weren't found in cache.
+        
+        Args:
+            items_to_process: Items without cached results
+        """
+        # Extract just the items for batch processing
+        raw_items = [item.item for item in items_to_process]
+        
+        # Partition into batches
+        batches = self._partition_into_batches(raw_items)
+        
+        # Process each batch
+        processed_count = 0
+        for i, batch in enumerate(batches):
+            try:
+                batch_results = self._process_batch_with_retry(batch)
+                
+                # Store results immediately
+                for j, result in enumerate(batch_results):
+                    item_index = processed_count + j
+                    processing_item = items_to_process[item_index]
+                    processing_item.cached_result = result
+                    
+                    # Persist to store
+                    self.store.store_result(
+                        processing_item.hash_key,
+                        processing_item.item,
+                        result
+                    )
+                    logger.debug(f"Stored result for hash key: {processing_item.hash_key}")
+                
+                processed_count += len(batch_results)
+                
+            except Exception as e:
+                error_msg = f"Failed to process batch {i+1}/{len(batches)}: {str(e)}"
+                logger.error(error_msg)
+                # Re-raise with context
+                raise RuntimeError(error_msg) from e
+    
+    def _collect_results(self, processing_items: List[ProcessingItem[T]]) -> List[R]:
+        """Collect all results in original order.
+        
+        Args:
+            processing_items: All processing items with results
+            
+        Returns:
+            Results in original input order
+        """
+        # Sort by original index to maintain order
+        sorted_items = sorted(processing_items, key=lambda x: x.original_index)
+        
+        results = []
+        for item in sorted_items:
+            if item.cached_result is None:
+                raise RuntimeError(f"No result found for item at index {item.original_index}")
+            results.append(item.cached_result)
+        
+        return results
     
     def _partition_into_batches(self, items: List[T]) -> List[List[T]]:
         """Partition items into batches of configured size.
