@@ -1,7 +1,7 @@
 """Unit tests for batch inference transform component."""
 
 import pytest
-from typing import List, Optional, Dict
+from typing import List, Optional
 from unittest.mock import Mock
 
 from apiana.core.components.transform.batch_inference import (
@@ -49,9 +49,6 @@ class MockStore:
         """Store result."""
         self.storage[hash_key] = result
     
-    def batch_get_by_hashes(self, hash_keys: List[str]) -> Dict[str, Optional[str]]:
-        """Batch get by hashes."""
-        return {key: self.storage.get(key) for key in hash_keys}
 
 
 def simple_hash(item: str) -> str:

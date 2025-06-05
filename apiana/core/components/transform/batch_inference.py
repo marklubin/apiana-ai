@@ -2,7 +2,7 @@
 
 import logging
 import time
-from typing import TypeVar, Generic, Callable, Protocol, List, Optional, Dict
+from typing import TypeVar, Generic, Callable, Protocol, List, Optional
 from dataclasses import dataclass
 from datetime import datetime
 
@@ -23,10 +23,6 @@ class BatchStore(Protocol[T, R]):
     
     def store_result(self, hash_key: str, input_item: T, result: R) -> None:
         """Store computation result with hash key."""
-        ...
-    
-    def batch_get_by_hashes(self, hash_keys: List[str]) -> Dict[str, Optional[R]]:
-        """Batch retrieve multiple results by hash keys."""
         ...
 
 
@@ -74,17 +70,10 @@ class BatchInferenceTransform(Component, Generic[T, R]):
             config: Batch processing configuration
             name: Optional component name
         """
+        super().__init__(name=name or "BatchInferenceTransform")
         self.provider = provider
         self.store = store
         self.batch_config = config
-        # Convert BatchConfig to dict for base class
-        config_dict = {
-            "batch_size": config.batch_size,
-            "max_retries": config.max_retries,
-            "retry_delay": config.retry_delay,
-            "timeout": config.timeout
-        }
-        super().__init__(name=name or "BatchInferenceTransform", config=config_dict)
     
     @property
     def input_types(self) -> List[type]:
@@ -129,8 +118,8 @@ class BatchInferenceTransform(Component, Generic[T, R]):
                 error_msg = f"Failed to process batch {i+1}/{len(batches)}: {str(e)}"
                 logger.error(error_msg)
                 errors.append(error_msg)
-                # Continue with other batches or raise?
-                raise  # For now, fail fast
+                # Re-raise with context
+                raise RuntimeError(error_msg) from e
         
         execution_time_ms = (time.time() - start_time) * 1000
         

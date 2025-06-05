@@ -7,8 +7,6 @@ from apiana.core.components.transform.validator import ValidationTransform
 from apiana.core.components.transform.batch_inference import (
     BatchInferenceTransform,
     BatchConfig,
-    BatchStore,
-    BatchProvider,
 )
 
 __all__ = [
@@ -18,6 +16,4 @@ __all__ = [
     "ValidationTransform",
     "BatchInferenceTransform",
     "BatchConfig",
-    "BatchStore",
-    "BatchProvider",
 ]
