@@ -38,17 +38,20 @@ class MockProvider:
 class MockStore:
     """Mock store for testing."""
     
-    def __init__(self):
-        self.storage = {}
+    def __init__(self, initial_data=None):
+        self.storage = initial_data or {}
+        self.get_calls = []
+        self.store_calls = []
     
     def get_by_hash(self, hash_key: str) -> Optional[str]:
         """Get item by hash."""
+        self.get_calls.append(hash_key)
         return self.storage.get(hash_key)
     
     def store_result(self, hash_key: str, input_item: str, result: str) -> None:
         """Store result."""
+        self.store_calls.append((hash_key, input_item, result))
         self.storage[hash_key] = result
-    
 
 
 def simple_hash(item: str) -> str:
@@ -107,6 +110,8 @@ class TestBatchInferenceTransform:
         assert transform.provider.calls[0] == inputs
         assert result.metadata["total_items"] == 3
         assert result.metadata["batch_count"] == 1
+        assert result.metadata["cached_items"] == 0
+        assert result.metadata["processed_items"] == 3
     
     def test_multiple_batches(self, transform):
         """Test processing items that require multiple batches."""
@@ -165,7 +170,7 @@ class TestBatchInferenceTransform:
         with pytest.raises(RuntimeError) as exc_info:
             transform.process(inputs)
         
-        assert "failed after 3 attempts" in str(exc_info.value)
+        assert "Batch processing failed" in str(exc_info.value)
         assert provider.call_count == 3
     
     def test_provider_wrong_result_count(self, mock_store, config):
@@ -274,3 +279,175 @@ class TestBatchInferenceTransform:
         
         assert result.execution_time_ms > 0
         assert result.timestamp is not None
+    
+    # New tests for caching and deduplication
+    
+    def test_cache_hit_all_items(self, mock_provider, config):
+        """Test when all items are found in cache."""
+        # Pre-populate store with cached results
+        store = MockStore(initial_data={
+            "hash_a": "CACHED_A",
+            "hash_b": "CACHED_B",
+            "hash_c": "CACHED_C"
+        })
+        
+        transform = BatchInferenceTransform(
+            provider=mock_provider,
+            store=store,
+            config=config
+        )
+        
+        inputs = ["a", "b", "c"]
+        result = transform.process(inputs)
+        
+        assert result.data == ["CACHED_A", "CACHED_B", "CACHED_C"]
+        assert mock_provider.call_count == 0  # No provider calls needed
+        assert len(store.get_calls) == 3  # Cache checked for all items
+        assert len(store.store_calls) == 0  # Nothing stored (all cached)
+        assert result.metadata["cached_items"] == 3
+        assert result.metadata["processed_items"] == 0
+        assert result.metadata["cache_hit_rate"] == 100.0
+    
+    def test_cache_hit_partial(self, mock_provider, config):
+        """Test when some items are cached and others need processing."""
+        # Pre-populate store with some cached results
+        store = MockStore(initial_data={
+            "hash_a": "CACHED_A",
+            "hash_c": "CACHED_C",
+            "hash_e": "CACHED_E"
+        })
+        
+        transform = BatchInferenceTransform(
+            provider=mock_provider,
+            store=store,
+            config=config
+        )
+        
+        inputs = ["a", "b", "c", "d", "e", "f"]
+        result = transform.process(inputs)
+        
+        assert result.data == ["CACHED_A", "B", "CACHED_C", "D", "CACHED_E", "F"]
+        assert mock_provider.call_count == 1  # One batch for uncached items
+        assert mock_provider.calls[0] == ["b", "d", "f"]  # Only uncached items
+        assert len(store.get_calls) == 6  # All items checked
+        assert len(store.store_calls) == 3  # Only uncached items stored
+        assert result.metadata["cached_items"] == 3
+        assert result.metadata["processed_items"] == 3
+        assert result.metadata["cache_hit_rate"] == 50.0
+    
+    def test_deduplication_same_items(self, mock_provider, config):
+        """Test deduplication when same items appear multiple times."""
+        store = MockStore()
+        transform = BatchInferenceTransform(
+            provider=mock_provider,
+            store=store,
+            config=config
+        )
+        
+        # Process same items twice
+        inputs1 = ["a", "b", "c"]
+        result1 = transform.process(inputs1)
+        assert result1.data == ["A", "B", "C"]
+        assert mock_provider.call_count == 1
+        
+        # Process same items again - should use cache
+        inputs2 = ["a", "b", "c"]
+        result2 = transform.process(inputs2)
+        assert result2.data == ["A", "B", "C"]
+        assert mock_provider.call_count == 1  # No new provider calls
+        assert result2.metadata["cached_items"] == 3
+        assert result2.metadata["cache_hit_rate"] == 100.0
+    
+    def test_store_persistence(self, mock_provider, config):
+        """Test that results are persisted to store."""
+        store = MockStore()
+        transform = BatchInferenceTransform(
+            provider=mock_provider,
+            store=store,
+            config=config
+        )
+        
+        inputs = ["a", "b", "c"]
+        transform.process(inputs)
+        
+        # Check that all results were stored
+        assert len(store.store_calls) == 3
+        assert store.store_calls[0] == ("hash_a", "a", "A")
+        assert store.store_calls[1] == ("hash_b", "b", "B")
+        assert store.store_calls[2] == ("hash_c", "c", "C")
+        
+        # Verify storage contents
+        assert store.storage["hash_a"] == "A"
+        assert store.storage["hash_b"] == "B"
+        assert store.storage["hash_c"] == "C"
+    
+    def test_mixed_order_with_cache(self, mock_provider, config):
+        """Test that results maintain original order even with mixed cache hits."""
+        store = MockStore(initial_data={
+            "hash_b": "CACHED_B",
+            "hash_d": "CACHED_D"
+        })
+        
+        transform = BatchInferenceTransform(
+            provider=mock_provider,
+            store=store,
+            config=config
+        )
+        
+        inputs = ["a", "b", "c", "d", "e"]
+        result = transform.process(inputs)
+        
+        # Results should maintain original order
+        assert result.data == ["A", "CACHED_B", "C", "CACHED_D", "E"]
+    
+    def test_hash_function_called(self, mock_provider, mock_store):
+        """Test that hash function is called for each input."""
+        hash_calls = []
+        
+        def tracking_hash(item):
+            hash_calls.append(item)
+            return f"tracked_hash_{item}"
+        
+        config = BatchConfig(
+            batch_size=3,
+            hash_function=tracking_hash,
+            max_retries=3,
+            retry_delay=0.1
+        )
+        
+        transform = BatchInferenceTransform(
+            provider=mock_provider,
+            store=mock_store,
+            config=config
+        )
+        
+        inputs = ["x", "y", "z"]
+        transform.process(inputs)
+        
+        assert hash_calls == ["x", "y", "z"]
+        assert mock_store.get_calls == ["tracked_hash_x", "tracked_hash_y", "tracked_hash_z"]
+    
+    def test_batch_processing_with_cache_gaps(self, mock_provider, config):
+        """Test batch processing when cached items create gaps."""
+        # Cache every other item
+        store = MockStore(initial_data={
+            "hash_a": "CACHED_A",
+            "hash_c": "CACHED_C",
+            "hash_e": "CACHED_E",
+            "hash_g": "CACHED_G"
+        })
+        
+        transform = BatchInferenceTransform(
+            provider=mock_provider,
+            store=store,
+            config=config
+        )
+        
+        inputs = ["a", "b", "c", "d", "e", "f", "g", "h"]
+        result = transform.process(inputs)
+        
+        # Should process uncached items in optimal batches
+        assert result.data == ["CACHED_A", "B", "CACHED_C", "D", "CACHED_E", "F", "CACHED_G", "H"]
+        assert mock_provider.call_count == 2  # Two batches: ["b", "d", "f"] and ["h"]
+        assert mock_provider.calls[0] == ["b", "d", "f"]
+        assert mock_provider.calls[1] == ["h"]
