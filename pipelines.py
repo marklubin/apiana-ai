@@ -2,17 +2,14 @@
 Pipeline Factory Definitions
 
 This module defines all available pipeline factory functions that can be used
-throughout the application. Each factory function takes specific inputs and
-returns a configured Pipeline instance ready for execution.
-
-Pipeline factories are automatically discovered by the Gradio application
-and other interfaces to provide dynamic UI generation.
+throughout the application. Each factory function is properly typed and only
+takes domain-specific parameters. System dependencies are injected from the
+global system module.
 """
 
-from typing import Optional, Dict, Any, List
+from typing import Optional, List
 from pathlib import Path
 from dataclasses import dataclass, field
-import inspect
 
 from apiana.core.pipelines.base import PipelineBuilder, Pipeline
 from apiana.core.components import (
@@ -27,10 +24,8 @@ from apiana.core.components.writers import (
     MemoryBlockWriter,
 )
 from apiana.core.components.managers import PipelineRunManager
-from apiana.core.providers.local import LocalTransformersLLM
-from apiana.stores import ApplicationStore, AgentMemoryStore
-from apiana.types.configuration import Neo4jConfig
-from neo4j_graphrag.embeddings.sentence_transformers import SentenceTransformerEmbeddings
+from apiana import system
+import inspect
 
 
 @dataclass
@@ -40,22 +35,15 @@ class PipelineMetadata:
     description: str
     category: str
     requires_files: bool = False
-    input_parameters: Dict[str, Any] = field(default_factory=dict)
     output_description: str = ""
     estimated_time: str = ""
     tags: List[str] = field(default_factory=list)
 
 
-# Pipeline Factory Functions
-# Each function should be decorated with metadata for UI discovery
-
 def chatgpt_full_processing_pipeline(
-    neo4j_config: Neo4jConfig,
     agent_id: str,
     input_file: Path,
     run_name: Optional[str] = None,
-    llm_model: str = "microsoft/DialoGPT-small",
-    embedding_model: str = "sentence-transformers/all-MiniLM-L6-v2",
     max_tokens: int = 5000,
     min_messages: int = 2,
     summary_max_length: int = 150
@@ -74,12 +62,9 @@ def chatgpt_full_processing_pipeline(
     - Tracks complete execution metadata
     
     Args:
-        neo4j_config: Neo4j database connection configuration
-        agent_id: Unique identifier for the agent (creates dedicated database)
+        agent_id: Unique identifier for the agent
         input_file: Path to ChatGPT export JSON file
         run_name: Optional custom name for this pipeline run
-        llm_model: HuggingFace model name for summarization
-        embedding_model: Sentence transformers model for embeddings
         max_tokens: Maximum tokens per conversation chunk
         min_messages: Minimum messages required per conversation
         summary_max_length: Maximum length for generated summaries
@@ -91,30 +76,19 @@ def chatgpt_full_processing_pipeline(
     if not run_name:
         run_name = f"Full ChatGPT Processing: {input_file.stem}"
     
-    # Create stores
-    app_store = ApplicationStore(neo4j_config)
-    agent_store = AgentMemoryStore(neo4j_config, agent_id)
+    # Ensure system is initialized
+    system._ensure_initialized()
     
-    # Create providers
-    local_llm = LocalTransformersLLM(
-        model_name=llm_model,
-        device="auto"
-    )
-    
-    local_embedder = SentenceTransformerEmbeddings(
-        embedding_model,
-        trust_remote_code=True
-    )
+    # Get agent-specific store
+    agent_store = system.get_agent_store(agent_id)
     
     # Create pipeline manager for execution tracking
     pipeline_manager = PipelineRunManager(
-        store=app_store,
+        store=system.app_store,
         run_name=run_name,
         config={
             "agent_id": agent_id, 
             "input_file": str(input_file),
-            "llm_model": llm_model,
-            "embedding_model": embedding_model,
             "max_tokens": max_tokens,
             "min_messages": min_messages,
         },
@@ -126,7 +100,7 @@ def chatgpt_full_processing_pipeline(
     reader = ChatGPTExportReader("chatgpt_reader")
     
     fragment_writer = ChatFragmentWriter(
-        store=app_store,
+        store=system.app_store,
         tags=["chatgpt_export", "full_processing", agent_id],
         name="fragment_persister"
     )
@@ -143,13 +117,13 @@ def chatgpt_full_processing_pipeline(
     
     summarizer = SummarizerTransform(
         name="summarizer",
-        llm_provider=local_llm,
+        llm_provider=system.llm_provider,
         config={"max_length": summary_max_length}
     )
     
     embedder = EmbeddingTransform(
         name="embedder",
-        embedding_provider=local_embedder
+        embedding_provider=system.embedding_provider
     )
     
     memory_writer = MemoryBlockWriter(
@@ -177,7 +151,6 @@ def chatgpt_full_processing_pipeline(
 
 
 def chatgpt_fragment_only_pipeline(
-    neo4j_config: Neo4jConfig,
     input_file: Path,
     run_name: Optional[str] = None,
     min_messages: int = 2,
@@ -195,32 +168,35 @@ def chatgpt_fragment_only_pipeline(
     - Tracks execution metadata
     
     Args:
-        neo4j_config: Neo4j database connection configuration
         input_file: Path to ChatGPT export JSON file
         run_name: Optional custom name for this pipeline run
         min_messages: Minimum messages required per conversation
         max_tokens: Maximum tokens per conversation chunk
-        tags: Optional custom tags for stored fragments
+        tags: Optional additional tags for fragments
         
     Returns:
-        Configured Pipeline for fragment storage only
+        Configured Pipeline ready for execution
     """
+    # Generate run name if not provided
     if not run_name:
         run_name = f"Fragment Storage: {input_file.stem}"
     
-    # Create application store
-    app_store = ApplicationStore(neo4j_config)
+    # Default tags
+    if tags is None:
+        tags = ["chatgpt_export", "fragment_only"]
+    
+    # Ensure system is initialized
+    system._ensure_initialized()
     
     # Create pipeline manager
     pipeline_manager = PipelineRunManager(
-        store=app_store,
+        store=system.app_store,
         run_name=run_name,
         config={
             "input_file": str(input_file),
             "min_messages": min_messages,
             "max_tokens": max_tokens,
         },
-        auto_link_fragments=True,
         name="pipeline_tracker"
     )
     
@@ -228,9 +204,9 @@ def chatgpt_fragment_only_pipeline(
     reader = ChatGPTExportReader("chatgpt_reader")
     
     fragment_writer = ChatFragmentWriter(
-        store=app_store,
-        tags=tags or ["chatgpt_export", "fragment_only"],
-        name="fragment_storage"
+        store=system.app_store,
+        tags=tags,
+        name="fragment_writer"
     )
     
     validator = ValidationTransform(
@@ -258,62 +234,46 @@ def chatgpt_fragment_only_pipeline(
 
 
 def fragment_to_memory_pipeline(
-    neo4j_config: Neo4jConfig,
     agent_id: str,
     run_name: Optional[str] = None,
-    llm_model: str = "microsoft/DialoGPT-small",
-    embedding_model: str = "sentence-transformers/all-MiniLM-L6-v2",
     summary_max_length: int = 150,
     memory_tags: Optional[List[str]] = None
 ) -> Pipeline:
     """
-    Process existing ChatFragments from the database into agent memories.
+    Convert existing ChatFragments into agent memories.
     
-    This pipeline is useful for post-processing stored ChatFragments:
-    - Retrieves ChatFragments from application database
-    - Summarizes conversations using local LLM
-    - Generates embeddings using local models
-    - Stores as agent memories in dedicated database
+    This pipeline processes previously stored fragments:
+    - Reads ChatFragments from application database (automatically via FragmentListReader)
+    - Generates summaries using local LLM
+    - Creates embeddings for semantic search
+    - Stores as memories in agent-specific database
     
     Args:
-        neo4j_config: Neo4j database connection configuration
-        agent_id: Unique identifier for the agent
+        agent_id: Target agent identifier for memory storage
         run_name: Optional custom name for this pipeline run
-        llm_model: HuggingFace model name for summarization
-        embedding_model: Sentence transformers model for embeddings
         summary_max_length: Maximum length for generated summaries
-        memory_tags: Optional custom tags for stored memories
+        memory_tags: Optional custom tags for memories
         
     Returns:
-        Pipeline for converting ChatFragments to agent memories
+        Configured Pipeline ready for execution
     """
+    # Generate run name if not provided
     if not run_name:
         run_name = f"Memory Generation for Agent: {agent_id}"
     
-    # Create stores
-    app_store = ApplicationStore(neo4j_config)
-    agent_store = AgentMemoryStore(neo4j_config, agent_id)
+    # Get agent-specific store
+    agent_store = system.get_agent_store(agent_id)
     
-    # Create providers
-    local_llm = LocalTransformersLLM(
-        model_name=llm_model,
-        device="auto"
-    )
-    
-    local_embedder = SentenceTransformerEmbeddings(
-        embedding_model,
-        trust_remote_code=True
-    )
+    # Ensure system is initialized
+    system._ensure_initialized()
     
     # Create pipeline manager
     pipeline_manager = PipelineRunManager(
-        store=app_store,
+        store=system.app_store,
         run_name=run_name,
         config={
             "agent_id": agent_id,
             "mode": "memory_generation",
-            "llm_model": llm_model,
-            "embedding_model": embedding_model,
         },
         name="pipeline_tracker"
     )
@@ -321,13 +281,13 @@ def fragment_to_memory_pipeline(
     # Create processing components
     summarizer = SummarizerTransform(
         name="summarizer",
-        llm_provider=local_llm,
+        llm_provider=system.llm_provider,
         config={"max_length": summary_max_length}
     )
     
     embedder = EmbeddingTransform(
         name="embedder",
-        embedding_provider=local_embedder
+        embedding_provider=system.embedding_provider
     )
     
     memory_writer = MemoryBlockWriter(
@@ -471,25 +431,12 @@ def dummy_test_pipeline(
 
 
 # Pipeline Metadata Registry
-# This allows the Gradio app to automatically discover and display pipelines
-
 PIPELINE_REGISTRY = {
     "chatgpt_full_processing_pipeline": PipelineMetadata(
         name="ChatGPT Full Processing",
         description="Complete end-to-end processing of ChatGPT exports with memory generation",
         category="ChatGPT Processing",
         requires_files=True,
-        input_parameters={
-            "neo4j_config": {"type": "neo4j_config", "required": True},
-            "agent_id": {"type": "string", "required": True, "description": "Unique agent identifier"},
-            "input_file": {"type": "file", "required": True, "accept": ".json"},
-            "run_name": {"type": "string", "required": False, "description": "Custom run name"},
-            "llm_model": {"type": "string", "default": "microsoft/DialoGPT-small", "description": "HuggingFace model for summarization"},
-            "embedding_model": {"type": "string", "default": "sentence-transformers/all-MiniLM-L6-v2", "description": "Embedding model"},
-            "max_tokens": {"type": "integer", "default": 5000, "description": "Maximum tokens per chunk"},
-            "min_messages": {"type": "integer", "default": 2, "description": "Minimum messages per conversation"},
-            "summary_max_length": {"type": "integer", "default": 150, "description": "Maximum summary length"}
-        },
         output_description="ChatFragments stored in application DB, memories stored in agent-specific DB",
         estimated_time="2-10 minutes depending on file size",
         tags=["chatgpt", "full-processing", "memory-generation", "ai-agent"]
@@ -497,36 +444,19 @@ PIPELINE_REGISTRY = {
     
     "chatgpt_fragment_only_pipeline": PipelineMetadata(
         name="ChatGPT Fragment Storage",
-        description="Simple ChatGPT export processing that only stores conversation fragments",
+        description="Store ChatGPT exports as fragments without memory generation",
         category="ChatGPT Processing",
         requires_files=True,
-        input_parameters={
-            "neo4j_config": {"type": "neo4j_config", "required": True},
-            "input_file": {"type": "file", "required": True, "accept": ".json"},
-            "run_name": {"type": "string", "required": False, "description": "Custom run name"},
-            "min_messages": {"type": "integer", "default": 2, "description": "Minimum messages per conversation"},
-            "max_tokens": {"type": "integer", "default": 5000, "description": "Maximum tokens per chunk"},
-            "tags": {"type": "list", "required": False, "description": "Custom tags for fragments"}
-        },
         output_description="ChatFragments stored in application database",
-        estimated_time="30 seconds - 2 minutes",
-        tags=["chatgpt", "storage", "fragments"]
+        estimated_time="1-5 minutes depending on file size",
+        tags=["chatgpt", "fragment-storage", "data-ingestion"]
     ),
     
     "fragment_to_memory_pipeline": PipelineMetadata(
         name="Fragment to Memory Conversion",
-        description="Convert existing ChatFragments into agent-specific memories",
+        description="Convert stored ChatFragments into agent memories with embeddings",
         category="Memory Processing",
         requires_files=False,
-        input_parameters={
-            "neo4j_config": {"type": "neo4j_config", "required": True},
-            "agent_id": {"type": "string", "required": True, "description": "Target agent identifier"},
-            "run_name": {"type": "string", "required": False, "description": "Custom run name"},
-            "llm_model": {"type": "string", "default": "microsoft/DialoGPT-small", "description": "HuggingFace model for summarization"},
-            "embedding_model": {"type": "string", "default": "sentence-transformers/all-MiniLM-L6-v2", "description": "Embedding model"},
-            "summary_max_length": {"type": "integer", "default": 150, "description": "Maximum summary length"},
-            "memory_tags": {"type": "list", "required": False, "description": "Custom tags for memories"}
-        },
         output_description="Agent memories stored in agent-specific database",
         estimated_time="1-5 minutes depending on fragment count",
         tags=["memory-generation", "ai-agent", "post-processing"]
@@ -537,12 +467,6 @@ PIPELINE_REGISTRY = {
         description="Safe testing pipeline that performs non-impactful operations like logging and simple calculations",
         category="Testing",
         requires_files=False,
-        input_parameters={
-            "message": {"type": "string", "default": "Hello from dummy pipeline!", "description": "Message to process"},
-            "iterations": {"type": "integer", "default": 3, "description": "Number of processing iterations"},
-            "delay_seconds": {"type": "number", "default": 0.5, "description": "Delay between iterations (seconds)"},
-            "output_file": {"type": "file", "required": False, "description": "Optional output file path"}
-        },
         output_description="JSON results with processing logs and dummy data",
         estimated_time="5-15 seconds",
         tags=["testing", "dummy", "safe", "ui-automation"]
@@ -550,7 +474,7 @@ PIPELINE_REGISTRY = {
 }
 
 
-def get_available_pipelines() -> Dict[str, PipelineMetadata]:
+def get_available_pipelines() -> dict[str, PipelineMetadata]:
     """
     Get all available pipeline factory functions with their metadata.
     
@@ -573,7 +497,6 @@ def get_pipeline_factory(pipeline_name: str):
     Raises:
         ValueError: If pipeline name is not found
     """
-    # Get the function from global namespace
     if pipeline_name in globals():
         return globals()[pipeline_name]
     else:

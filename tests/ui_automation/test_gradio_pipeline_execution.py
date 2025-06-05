@@ -117,294 +117,376 @@ def test_gradio_app_loads(page_with_server: Page):
     # Check that the main title is present
     expect(page.locator("h1")).to_contain_text("Apiana AI Pipeline Runner")
     
-    # Check that tabs are present
-    tabs = page.locator("[role='tab']")
-    assert tabs.count() > 0, "No tabs found on the page"
+    # Check that the pipeline dropdown is present
+    dropdown = page.locator("#pipeline_selector")
+    expect(dropdown).to_be_visible()
     
     # Take a screenshot for debugging
     page.screenshot(path="tests/ui_automation/screenshots/app_loaded.png")
 
 
 @pytest.mark.ui_automation
-def test_testing_tab_exists(page_with_server: Page):
-    """Test that the Testing tab exists with the dummy pipeline."""
+def test_pipeline_dropdown_contains_dummy_pipeline(page_with_server: Page):
+    """Test that the pipeline dropdown contains the dummy test pipeline."""
     page = page_with_server
     
-    # Look for the Testing tab
-    testing_tab = page.locator("[role='tab']", has_text="Testing")
-    expect(testing_tab).to_be_visible()
+    # Get the dropdown element
+    dropdown = page.locator("#pipeline_selector")
     
-    # Click on the Testing tab
-    testing_tab.click()
+    # Gradio dropdowns use a specific structure
+    # First, check if the dropdown is visible
+    expect(dropdown).to_be_visible()
     
-    # Wait for the tab content to load
+    # Click on the dropdown input area
+    dropdown_input = dropdown.locator("input").first
+    dropdown_input.click()
+    
+    # Wait for dropdown options to appear
     page.wait_for_timeout(1000)
     
-    # Check that some form of pipeline selection is available
-    # Gradio UI structure may vary, so try different selectors
-    selection_elements = page.locator("select, .dropdown, [role='button'], input").all()
-    assert len(selection_elements) > 0, "No interactive elements found for pipeline selection"
+    # Take a screenshot to debug
+    page.screenshot(path="tests/ui_automation/screenshots/dropdown_open.png")
+    
+    # Look for dummy_test_pipeline in the dropdown list
+    # Gradio dropdowns create a separate div with options
+    options = page.locator("[role='option']")
+    
+    # Check if any option contains dummy_test_pipeline
+    found = False
+    count = options.count()
+    for i in range(count):
+        text = options.nth(i).text_content()
+        if "dummy_test_pipeline" in text:
+            found = True
+            break
+    
+    assert found, f"dummy_test_pipeline not found in dropdown. Found {count} options."
+
+
+@pytest.mark.ui_automation
+def test_select_dummy_pipeline_shows_parameters(page_with_server: Page):
+    """Test that selecting the dummy pipeline shows its parameter form."""
+    page = page_with_server
+    
+    # Select the dummy pipeline
+    dropdown = page.locator("#pipeline_selector")
+    dropdown_input = dropdown.locator("input").first
+    dropdown_input.click()
+    page.wait_for_timeout(500)
+    
+    # Find and click on dummy_test_pipeline option
+    options = page.locator("[role='option']")
+    for i in range(options.count()):
+        if "dummy_test_pipeline" in options.nth(i).text_content():
+            options.nth(i).click()
+            break
+    
+    # Wait for the parameter form to render
+    page.wait_for_timeout(1500)
+    
+    # Check that pipeline description is updated
+    description = page.locator("#pipeline_description")
+    expect(description).to_contain_text("Dummy Test Pipeline")
+    expect(description).to_contain_text("Safe testing pipeline")
+    
+    # Check that parameter inputs are visible
+    message_container = page.locator("#param_message")
+    expect(message_container).to_be_visible()
+    expect(message_container.locator("input, textarea").first).to_be_visible()
+    
+    iterations_container = page.locator("#param_iterations")
+    expect(iterations_container).to_be_visible()
+    expect(iterations_container.locator("input").first).to_be_visible()
+    
+    delay_container = page.locator("#param_delay_seconds")
+    expect(delay_container).to_be_visible()
+    expect(delay_container.locator("input").first).to_be_visible()
+    
+    # Check execute button is visible
+    execute_btn = page.locator("#execute_button")
+    expect(execute_btn).to_be_visible()
     
     # Take a screenshot
-    page.screenshot(path="tests/ui_automation/screenshots/testing_tab.png")
-
-
-@pytest.mark.ui_automation 
-def test_dummy_pipeline_selection(page_with_server: Page):
-    """Test selecting the dummy pipeline and verifying its description."""
-    page = page_with_server
-    
-    # Navigate to Testing tab
-    testing_tab = page.locator("[role='tab']", has_text="Testing")
-    testing_tab.click()
-    page.wait_for_timeout(1000)
-    
-    # Find and interact with the pipeline dropdown
-    # Gradio dropdowns can be tricky, let's try multiple selectors
-    dropdown_selectors = [
-        ".dropdown select",
-        "select",
-        "[data-testid='dropdown']",
-        ".gradio-dropdown select"
-    ]
-    
-    dropdown = None
-    for selector in dropdown_selectors:
-        try:
-            dropdown = page.locator(selector).first
-            if dropdown.is_visible():
-                break
-        except:
-            continue
-    
-    if dropdown and dropdown.is_visible():
-        # Select the dummy test pipeline
-        dropdown.select_option(label="Dummy Test Pipeline")
-        page.wait_for_timeout(1000)
-    else:
-        # Alternative: look for clickable dropdown elements
-        dropdown_button = page.locator(".dropdown, [role='button']").filter(has_text="Select Pipeline").first
-        if dropdown_button.is_visible():
-            dropdown_button.click()
-            page.wait_for_timeout(500)
-            
-            # Look for the dummy pipeline option
-            dummy_option = page.locator("text=Dummy Test Pipeline").first
-            if dummy_option.is_visible():
-                dummy_option.click()
-                page.wait_for_timeout(1000)
-    
-    # Check that the dummy pipeline appears somewhere on the page
-    # (the exact UI structure may vary)
-    page_content = page.text_content("body")
-    assert "Dummy Test Pipeline" in page_content or "Safe testing pipeline" in page_content, \
-        "Dummy pipeline not found in page content"
-    
-    page.screenshot(path="tests/ui_automation/screenshots/dummy_pipeline_selected.png")
+    page.screenshot(path="tests/ui_automation/screenshots/parameters_shown.png")
 
 
 @pytest.mark.ui_automation
-def test_dummy_pipeline_parameters(page_with_server: Page):
-    """Test that dummy pipeline parameters are displayed and can be modified."""
+def test_fill_parameters_and_execute(page_with_server: Page):
+    """Test filling in parameters and executing the pipeline."""
     page = page_with_server
     
-    # Navigate to Testing tab and select dummy pipeline
-    testing_tab = page.locator("[role='tab']", has_text="Testing")
-    testing_tab.click()
-    page.wait_for_timeout(1000)
+    # Select the dummy pipeline
+    assert select_gradio_dropdown(page, "pipeline_selector", "dummy_test_pipeline")
+    page.wait_for_timeout(1500)
     
-    # Try to select the dummy pipeline (this might need adjustment based on actual UI)
-    try:
-        # Look for any input fields that might be the pipeline parameters
-        message_input = page.locator("input, textarea").filter(has=page.locator("label:has-text('message')")).first
-        if message_input.is_visible():
-            message_input.fill("Hello from UI test!")
-            
-        iterations_input = page.locator("input[type='number']").filter(has=page.locator("label:has-text('iterations')")).first
-        if iterations_input.is_visible():
-            iterations_input.fill("2")
-            
-        delay_input = page.locator("input[type='number']").filter(has=page.locator("label:has-text('delay')")).first
-        if delay_input.is_visible():
-            delay_input.fill("0.2")
-    except:
-        # If specific parameter inputs aren't found, just verify some inputs exist
-        inputs = page.locator("input, textarea, select")
-        expect(inputs).to_have_count_greater_than(0)
+    # Fill in parameters - Gradio nests inputs within containers
+    message_input = page.locator("#param_message").locator("input, textarea").first
+    message_input.fill("Test message from UI automation")
     
+    iterations_input = page.locator("#param_iterations").locator("input").first
+    iterations_input.fill("2")  # Use 2 iterations for faster test
+    
+    delay_input = page.locator("#param_delay_seconds").locator("input").first
+    delay_input.fill("0.5")
+    
+    # Take screenshot before execution
     page.screenshot(path="tests/ui_automation/screenshots/parameters_filled.png")
-
-
-@pytest.mark.ui_automation
-def test_dummy_pipeline_execution(page_with_server: Page):
-    """Test executing the dummy pipeline and verifying results."""
-    page = page_with_server
     
-    # Navigate to Testing tab
-    testing_tab = page.locator("[role='tab']", has_text="Testing")
-    testing_tab.click()
-    page.wait_for_timeout(1000)
+    # Click execute button
+    execute_btn = page.locator("#execute_button")
+    execute_btn.click()
     
-    # The Testing tab should show the Dummy Test Pipeline directly
-    # Wait a bit for the UI to load completely
+    # Wait a moment for execution to start
     page.wait_for_timeout(2000)
     
-    # Try to find and fill basic parameters
-    try:
-        # Look for common input patterns
-        text_inputs = page.locator("input[type='text'], textarea")
-        if text_inputs.count() > 0:
-            text_inputs.first.fill("UI Test Message")
-            
-        number_inputs = page.locator("input[type='number']")
-        if number_inputs.count() > 0:
-            number_inputs.first.fill("2")  # Set iterations to 2
-    except:
-        pass  # Parameters might not be accessible yet
-    
-    # Debug: List all buttons on the page (commented out for clean output)
-    # all_buttons = page.locator("button").all()
-    # print(f"Found {len(all_buttons)} buttons on the page")
-    # for i, btn in enumerate(all_buttons):
-    #     try:
-    #         text = btn.text_content()
-    #         print(f"Button {i}: '{text}'")
-    #     except:
-    #         pass
-    
-    # Look for execute button with various text patterns
-    execute_button = None
-    button_texts = ["🚀 Execute Pipeline", " 🚀 Execute Pipeline", "Execute Pipeline", "Execute", "Run"]
-    
-    for text in button_texts:
-        try:
-            button = page.locator("button").filter(has_text=text).first
-            if button.is_visible():
-                execute_button = button
-                break
-        except:
-            continue
-    
-    # Also try by element ID since we know it has a specific ID pattern
-    if not execute_button or not execute_button.is_visible():
-        try:
-            # The ID should be execute_Testing since we're in the Testing tab
-            execute_button = page.locator("button[id='execute_Testing']").first
-            if execute_button.is_visible():
-                pass  # Found it!
-        except:
-            pass
-    
-    # Try one more time with a more flexible approach
-    if not execute_button or not execute_button.is_visible():
-        try:
-            execute_button = page.locator("button").filter(has_text="Execute").filter(has_text="Pipeline").first
-            if execute_button.is_visible():
-                pass  # Found it!
-        except:
-            pass
-    
-    if execute_button and execute_button.is_visible():
-        # Take screenshot before execution
-        page.screenshot(path="tests/ui_automation/screenshots/before_execution.png")
-        
-        # Click execute button
-        execute_button.click()
-        
-        # Wait for execution to complete (dummy pipeline should be fast)
-        page.wait_for_timeout(5000)  # 5 seconds should be enough for dummy pipeline
-        
-        # Look for success indicators
-        success_indicators = [
-            "text=completed",
-            "text=success",
-            "text=✅",
-            "text=finished",
-            ".success",
-            "[class*='success']"
-        ]
-        
-        found_success = False
-        for indicator in success_indicators:
-            try:
-                element = page.locator(indicator).first
-                if element.is_visible():
-                    found_success = True
-                    break
-            except:
-                continue
-        
-        # Take screenshot after execution
-        page.screenshot(path="tests/ui_automation/screenshots/after_execution.png")
-        
-        # Check that some output appeared (logs, results, etc.)
-        page_content = page.content()
-        assert any(keyword in page_content.lower() for keyword in [
-            "dummy", "processing", "iteration", "completed", "result"
-        ]), "No execution output detected"
-        
-    else:
-        # If we can't find execute button, just verify the UI is responsive
-        page.screenshot(path="tests/ui_automation/screenshots/no_execute_button.png")
-        pytest.skip("Execute button not found - UI structure might have changed")
+    # Take screenshot after clicking execute
+    page.screenshot(path="tests/ui_automation/screenshots/execution_started.png")
 
 
 @pytest.mark.ui_automation
-def test_logs_and_results_display(page_with_server: Page):
-    """Test that logs and results are displayed during/after execution."""
+def test_execution_history_updates(page_with_server: Page):
+    """Test that execution history shows updates during pipeline execution."""
     page = page_with_server
     
-    # Navigate to Testing tab
-    testing_tab = page.locator("[role='tab']", has_text="Testing")
-    testing_tab.click()
+    # Select and execute the dummy pipeline
+    assert select_gradio_dropdown(page, "pipeline_selector", "dummy_test_pipeline")
+    page.wait_for_timeout(1500)
+    
+    # Fill minimal parameters - use longer delay to catch RUNNING state
+    message_input = page.locator("#param_message").locator("input, textarea").first
+    message_input.fill("Quick test")
+    
+    iterations_input = page.locator("#param_iterations").locator("input").first
+    iterations_input.fill("3")
+    
+    delay_input = page.locator("#param_delay_seconds").locator("input").first
+    delay_input.fill("1.0")
+    
+    # Execute
+    execute_btn = page.locator("#execute_button")
+    execute_btn.click()
+    
+    # Wait for execution to appear in history
     page.wait_for_timeout(1000)
     
-    # Look for expandable sections (logs, results)
-    expandable_sections = page.locator("details, .accordion, [role='button'][aria-expanded]")
+    # Check for execution entry in the history markdown
+    history_display = page.locator("#execution_history")
+    expect(history_display).to_be_visible()
     
-    if expandable_sections.count() > 0:
-        # Expand the first section
-        expandable_sections.first.click()
-        page.wait_for_timeout(500)
-        
-        # Check if content is revealed
-        page.screenshot(path="tests/ui_automation/screenshots/expanded_section.png")
+    # Check that the history contains the pipeline name and running status
+    history_text = history_display.text_content()
+    assert "dummy_test_pipeline" in history_text
+    assert "RUNNING" in history_text
     
-    # Look for text areas or code blocks that might contain logs
-    log_areas = page.locator("textarea[readonly], .log, .code, pre")
+    # Check for the running emoji
+    assert "🔄" in history_text
     
-    # Take final screenshot
-    page.screenshot(path="tests/ui_automation/screenshots/logs_and_results.png")
-    
-    # Verify that the page has some dynamic content
-    page_text = page.text_content("body")
-    assert len(page_text) > 100, "Page seems to have minimal content"
+    # Take screenshot of running state
+    page.screenshot(path="tests/ui_automation/screenshots/execution_running.png")
 
 
 @pytest.mark.ui_automation
-def test_responsive_ui_elements(page_with_server: Page):
-    """Test that UI elements are responsive and interactive."""
+def test_execution_completes_successfully(page_with_server: Page):
+    """Test that pipeline execution completes successfully with proper status updates."""
     page = page_with_server
     
-    # Test different tab interactions
-    tabs = page.locator("[role='tab']")
-    tab_count = tabs.count()
+    # Select and execute the dummy pipeline with short duration
+    assert select_gradio_dropdown(page, "pipeline_selector", "dummy_test_pipeline")
+    page.wait_for_timeout(1500)
     
-    if tab_count > 1:
-        # Click through different tabs
-        for i in range(min(tab_count, 3)):  # Test up to 3 tabs
-            tabs.nth(i).click()
-            page.wait_for_timeout(500)
-            
-            # Verify tab content changes
-            page.screenshot(path=f"tests/ui_automation/screenshots/tab_{i}.png")
+    # Set very short execution time
+    iterations_input = page.locator("#param_iterations").locator("input").first
+    iterations_input.fill("1")
     
-    # Test that the page is generally responsive
-    expect(page.locator("body")).to_be_visible()
-    expect(page.locator("h1")).to_be_visible()
+    delay_input = page.locator("#param_delay_seconds").locator("input").first
+    delay_input.fill("0.1")
     
-    # Final comprehensive screenshot
-    page.screenshot(path="tests/ui_automation/screenshots/full_app.png")
+    # Execute
+    execute_btn = page.locator("#execute_button")
+    execute_btn.click()
+    
+    # Wait for completion (1 iteration * 0.1s delay + overhead)
+    page.wait_for_timeout(3000)
+    
+    # Check for completed status in the history
+    history_display = page.locator("#execution_history")
+    history_text = history_display.text_content()
+    assert "COMPLETED" in history_text
+    
+    # Check for success emoji
+    success_emoji = page.locator("text=✅")
+    expect(success_emoji).to_be_visible()
+    
+    # Verify execution time is shown
+    duration_text = page.locator("text=/\\d+\\.\\d+s/")
+    expect(duration_text).to_be_visible()
+    
+    # Take screenshot of completed state
+    page.screenshot(path="tests/ui_automation/screenshots/execution_completed.png")
+
+
+@pytest.mark.ui_automation
+def test_logs_are_displayed_during_execution(page_with_server: Page):
+    """Test that logs are displayed and updated during execution."""
+    page = page_with_server
+    
+    # Select and execute the dummy pipeline
+    assert select_gradio_dropdown(page, "pipeline_selector", "dummy_test_pipeline")
+    page.wait_for_timeout(1500)
+    
+    # Set parameters for observable execution
+    message_input = page.locator("#param_message").locator("input, textarea").first
+    message_input.fill("Log test message")
+    
+    iterations_input = page.locator("#param_iterations").locator("input").first
+    iterations_input.fill("3")
+    
+    delay_input = page.locator("#param_delay_seconds").locator("input").first
+    delay_input.fill("0.5")
+    
+    # Execute
+    execute_btn = page.locator("#execute_button")
+    execute_btn.click()
+    
+    # Wait for execution to start
+    page.wait_for_timeout(1000)
+    
+    # Get the execution history display
+    history_display = page.locator("#execution_history")
+    expect(history_display).to_be_visible()
+    
+    # Get initial history text
+    initial_text = history_display.text_content()
+    assert "RUNNING" in initial_text
+    
+    # Wait for logs to appear in the history
+    page.wait_for_timeout(2000)
+    
+    # Check that logs are being displayed
+    updated_text = history_display.text_content()
+    
+    # Verify log content appears
+    assert "Recent Logs:" in updated_text
+    assert len(updated_text) > len(initial_text)  # More content should have appeared
+    
+    # Take screenshot of logs
+    page.screenshot(path="tests/ui_automation/screenshots/execution_logs.png")
+
+
+@pytest.mark.ui_automation
+def test_multiple_executions_in_history(page_with_server: Page):
+    """Test that multiple executions appear in history with newest first."""
+    page = page_with_server
+    
+    # Execute pipeline twice with different parameters
+    for i in range(2):
+        # Select pipeline
+        assert select_gradio_dropdown(page, "pipeline_selector", "dummy_test_pipeline")
+        page.wait_for_timeout(1500)
+        
+        # Set unique message
+        message_input = page.locator("#param_message").locator("input, textarea").first
+        message_input.fill(f"Execution {i+1}")
+        
+        iterations_input = page.locator("#param_iterations").locator("input").first
+        iterations_input.fill("1")
+        
+        delay_input = page.locator("#param_delay_seconds").locator("input").first
+        delay_input.fill("0.1")
+        
+        # Execute
+        execute_btn = page.locator("#execute_button")
+        execute_btn.click()
+        
+        # Wait before next execution
+        page.wait_for_timeout(2000)
+    
+    # Verify both executions are in history
+    history_display = page.locator("#execution_history")
+    history_text = history_display.text_content()
+    
+    # Count occurrences of the pipeline name
+    pipeline_count = history_text.count("dummy_test_pipeline")
+    assert pipeline_count >= 2, f"Expected at least 2 executions, found {pipeline_count}"
+    
+    # Take screenshot
+    page.screenshot(path="tests/ui_automation/screenshots/multiple_executions.png")
+
+
+@pytest.mark.ui_automation
+def test_clear_history_functionality(page_with_server: Page):
+    """Test that clear history button removes all executions."""
+    page = page_with_server
+    
+    # Execute a pipeline first
+    assert select_gradio_dropdown(page, "pipeline_selector", "dummy_test_pipeline")
+    page.wait_for_timeout(1500)
+    
+    execute_btn = page.locator("#execute_button")
+    execute_btn.click()
+    page.wait_for_timeout(2000)
+    
+    # Verify execution is in history
+    history_display = page.locator("#execution_history")
+    history_text = history_display.text_content()
+    assert "dummy_test_pipeline" in history_text
+    
+    # Click clear history button
+    clear_btn = page.locator("#clear_history")
+    clear_btn.click()
+    page.wait_for_timeout(1000)
+    
+    # Verify history is cleared
+    cleared_text = history_display.text_content()
+    assert "No executions yet" in cleared_text
+    
+    # Take screenshot
+    page.screenshot(path="tests/ui_automation/screenshots/history_cleared.png")
+
+
+@pytest.mark.ui_automation
+def test_parameter_validation(page_with_server: Page):
+    """Test that parameter inputs validate correctly."""
+    page = page_with_server
+    
+    # Select the dummy pipeline
+    assert select_gradio_dropdown(page, "pipeline_selector", "dummy_test_pipeline")
+    page.wait_for_timeout(1500)
+    
+    # Test number input validation
+    iterations_input = page.locator("#param_iterations").locator("input").first
+    
+    # Clear and enter non-numeric value (Gradio should prevent this)
+    iterations_input.fill("")
+    iterations_input.type("abc")
+    
+    # Verify the value is not accepted (should remain empty or show default)
+    value = iterations_input.input_value()
+    assert value == "" or value.isdigit()
+    
+    # Enter valid number
+    iterations_input.fill("5")
+    assert iterations_input.input_value() == "5"
+    
+    # Take screenshot
+    page.screenshot(path="tests/ui_automation/screenshots/parameter_validation.png")
+
+
+# Helper function to select from Gradio dropdown
+def select_gradio_dropdown(page: Page, dropdown_id: str, option_text: str):
+    """Helper to select an option from a Gradio dropdown."""
+    dropdown = page.locator(f"#{dropdown_id}")
+    dropdown_input = dropdown.locator("input").first
+    dropdown_input.click()
+    page.wait_for_timeout(500)
+    
+    # Find and click the option
+    options = page.locator("[role='option']")
+    for i in range(options.count()):
+        if option_text in options.nth(i).text_content():
+            options.nth(i).click()
+            return True
+    return False
 
 
 # Helper function to run tests

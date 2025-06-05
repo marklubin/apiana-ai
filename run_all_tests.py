@@ -9,7 +9,6 @@ It handles environment setup checks and provides clear feedback.
 import subprocess
 import sys
 import time
-from pathlib import Path
 
 
 class Colors:

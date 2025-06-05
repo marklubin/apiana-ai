@@ -1,6 +1,5 @@
 from datetime import datetime
-from typing import List, Optional
-import uuid
+from typing import List
 
 from neomodel import config as neomodel_config
 from neomodel import db
