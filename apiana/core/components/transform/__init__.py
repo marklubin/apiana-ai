@@ -8,6 +8,12 @@ from apiana.core.components.transform.batch_inference import (
     BatchInferenceTransform,
     BatchConfig,
 )
+from apiana.core.components.transform.batch_summary import (
+    BatchingChatFragmentSummaryTransform,
+)
+from apiana.core.components.transform.batch_embedding import (
+    BatchEmbeddingTransform,
+)
 
 __all__ = [
     "Transform",
@@ -16,4 +22,6 @@ __all__ = [
     "ValidationTransform",
     "BatchInferenceTransform",
     "BatchConfig",
+    "BatchingChatFragmentSummaryTransform",
+    "BatchEmbeddingTransform",
 ]

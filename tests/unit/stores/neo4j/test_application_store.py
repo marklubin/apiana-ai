@@ -89,7 +89,9 @@ class TestApplicationStore:
                 update_time=sample_fragment.update_time,
                 messages=sample_fragment.messages,
                 message_metadata=[],
-                tags=["test", "conversation"]
+                tags=["test", "conversation"],
+                summary_agent_id=None,
+                summary_hash=None
             )
 
             assert result == mock_new_node
@@ -218,30 +220,19 @@ class TestApplicationStore:
             assert len(result) == 2
 
     @patch("apiana.stores.neo4j.application_store.ChatFragmentNode")
+    @patch("apiana.stores.neo4j.application_store.db")
     def test_search_fragments_by_title(
-        self, mock_fragment_node_class, mock_neo4j_config
+        self, mock_db, mock_fragment_node_class, mock_neo4j_config
     ):
         """Should search fragments by title content."""
         # Arrange
         mock_node = Mock()
-        mock_node.fragment_id = "frag-1"
+        mock_fragment_node_class.inflate.return_value = mock_node
+        
+        # Mock cypher query results
+        mock_db.cypher_query.return_value = ([[mock_node]], None)
 
-        mock_slice_result = MagicMock()
-        mock_slice_result.__getitem__.return_value = [mock_node]
-        
-        mock_order_result = MagicMock()
-        mock_order_result.__getitem__.return_value = [mock_node]
-        
-        mock_filter_result = MagicMock()
-        mock_filter_result.order_by.return_value = mock_order_result
-        
-        mock_query = MagicMock()
-        mock_query.filter.return_value = mock_filter_result
-        mock_fragment_node_class.nodes = mock_query
-
-        with patch("apiana.stores.neo4j.application_store.neomodel_config"), \
-             patch("apiana.stores.neo4j.application_store.db"):
-            
+        with patch("apiana.stores.neo4j.application_store.neomodel_config"):
             store = ApplicationStore(mock_neo4j_config)
 
             # Act
@@ -249,7 +240,16 @@ class TestApplicationStore:
                 result = store.search_fragments("test query")
 
             # Assert
-            mock_query.filter.assert_called_with(title__icontains="test query")
+            expected_query = """
+        MATCH (f:ChatFragmentNode)
+        WHERE f.title CONTAINS $search_text
+        RETURN f
+        LIMIT $limit
+        """
+            mock_db.cypher_query.assert_called_with(
+                expected_query, 
+                {"search_text": "test query", "limit": 50}
+            )
             assert len(result) == 1
 
     @patch("apiana.stores.neo4j.application_store.ChatFragmentNode")
@@ -259,6 +259,11 @@ class TestApplicationStore:
         """Should delete fragment when found."""
         # Arrange
         mock_node = Mock()
+        # Mock embeddings relationship
+        mock_embeddings = Mock()
+        mock_embeddings.all.return_value = []  # No embeddings to delete
+        mock_node.embeddings = mock_embeddings
+        
         mock_nodes = Mock()
         mock_nodes.filter.return_value.first.return_value = mock_node
         mock_fragment_node_class.nodes = mock_nodes
@@ -422,11 +427,13 @@ class TestApplicationStore:
             mock_nodes.order_by.assert_called_with('-started_at')
             assert result == mock_runs
 
+    @patch("apiana.stores.neo4j.application_store.EmbeddingNode")
     @patch("apiana.stores.neo4j.application_store.PipelineRunNode")
     @patch("apiana.stores.neo4j.application_store.ChatFragmentNode")
     @patch("apiana.stores.neo4j.application_store.datetime")
     def test_get_run_statistics(
-        self, mock_datetime, mock_fragment_node_class, mock_run_node_class, mock_neo4j_config
+        self, mock_datetime, mock_fragment_node_class, mock_run_node_class, 
+        mock_embedding_node_class, mock_neo4j_config
     ):
         """Should return statistics about stored data."""
         # Arrange
@@ -444,6 +451,11 @@ class TestApplicationStore:
         mock_run_nodes = MagicMock()
         mock_run_nodes.__len__.return_value = 20
         mock_run_node_class.nodes = mock_run_nodes
+        
+        # Mock embedding nodes
+        mock_embedding_nodes = MagicMock()
+        mock_embedding_nodes.__len__.return_value = 50
+        mock_embedding_node_class.nodes = mock_embedding_nodes
 
         with patch("apiana.stores.neo4j.application_store.neomodel_config"), \
              patch("apiana.stores.neo4j.application_store.db"):
@@ -456,6 +468,7 @@ class TestApplicationStore:
             # Assert
             assert result["total_fragments"] == 100
             assert result["total_pipeline_runs"] == 20
+            assert result["total_embeddings"] == 50
             assert result["fragments_added_today"] == 5
 
     def test_node_to_fragment_conversion(self, mock_neo4j_config):
